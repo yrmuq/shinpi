@@ -163,7 +163,7 @@ fn upower_device(path: &str, props: &Props) -> Option<Device> {
     let key = address(&serial).unwrap_or_else(|| {
         if !serial.is_empty() {
             format!("serial:{serial}:{name}")
-        } else if battery_path.exists() {
+        } else if !native_name.is_empty() && battery_path.exists() {
             power_key(&battery_path)
         } else {
             path.to_owned()
@@ -370,6 +370,7 @@ mod tests {
             ("Percentage".into(), OwnedVariant::from(10.0f64)),
         ]);
         let d = upower_device("/mouse", &p).unwrap();
+        assert_ne!(d.id, upower_device("/another_mouse", &p).unwrap().id);
         assert_eq!(d.reading.percent, None);
         assert_eq!(d.reading.text(), "Низкий");
         p.insert("BatteryLevel".into(), OwnedVariant::from(0u32));
