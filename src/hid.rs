@@ -211,13 +211,6 @@ pub fn scan(scan: &mut Scan) {
         let key = address(&unique)
             .or_else(|| info.serial_number().and_then(address))
             .unwrap_or_else(|| format!("sys:{}", sysfs.canonicalize().unwrap_or(sysfs).display()));
-        if scan
-            .devices
-            .iter()
-            .any(|d| d.keys.contains(&key) && d.has_reading())
-        {
-            continue;
-        }
         let mut row = Device::new(key, name.into(), kind, source);
         let result = info
             .open_device(&api)

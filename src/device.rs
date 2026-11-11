@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Mouse,
     Keyboard,
@@ -48,7 +48,7 @@ impl Kind {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reading {
     pub percent: Option<u8>,
     pub level: Option<String>,
@@ -74,9 +74,9 @@ impl Reading {
         }
     }
 
-    pub fn low(&self) -> bool {
+    pub fn low(&self, threshold: u8) -> bool {
         !self.charging
-            && (self.percent.is_some_and(|p| p <= 15)
+            && (self.percent.is_some_and(|p| p <= threshold)
                 || self
                     .level
                     .as_deref()
@@ -84,10 +84,38 @@ impl Reading {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Band {
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Full = 4,
+}
+
+impl Reading {
+    pub fn band(&self) -> Option<Band> {
+        if let Some(percent) = self.percent {
+            return Some(match percent {
+                100 => Band::Full,
+                51..=99 => Band::High,
+                26..=50 => Band::Medium,
+                _ => Band::Low,
+            });
+        }
+        match self.level.as_deref()? {
+            "Критический" | "Низкий" => Some(Band::Low),
+            "Средний" => Some(Band::Medium),
+            "Высокий" => Some(Band::High),
+            "Полный" => Some(Band::Full),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Device {
     #[serde(skip)]
-    pub keys: Vec<String>,
+    pub id: String,
     pub name: String,
     pub kind: Kind,
     pub reading: Reading,
@@ -98,7 +126,7 @@ pub struct Device {
 impl Device {
     pub fn new(key: String, name: String, kind: Kind, source: &str) -> Self {
         Self {
-            keys: vec![key],
+            id: format!("{source}:{key}"),
             name,
             kind,
             reading: Reading::default(),
@@ -106,7 +134,6 @@ impl Device {
             status: String::new(),
         }
     }
-
     pub fn has_reading(&self) -> bool {
         self.reading.percent.is_some() || self.reading.level.is_some() || self.reading.charging
     }
@@ -119,32 +146,8 @@ pub struct Scan {
 }
 
 impl Scan {
-    pub fn insert(&mut self, next: Device) {
-        if let Some(old) = self
-            .devices
-            .iter_mut()
-            .find(|d| d.keys.iter().any(|key| next.keys.contains(key)))
-        {
-            if !old.has_reading()
-                || (next.has_reading()
-                    && next.reading.percent.is_some()
-                    && old.reading.percent.is_none())
-            {
-                let keys = std::mem::take(&mut old.keys);
-                *old = next;
-                old.keys.extend(keys);
-            } else {
-                old.keys.extend(next.keys);
-                old.reading.charging |= next.reading.charging;
-                if old.kind == Kind::Other {
-                    old.kind = next.kind;
-                }
-            }
-            old.keys.sort();
-            old.keys.dedup();
-        } else {
-            self.devices.push(next);
-        }
+    pub fn insert(&mut self, device: Device) {
+        self.devices.push(device);
     }
 }
 
@@ -166,24 +169,35 @@ pub fn address(text: &str) -> Option<String> {
 mod tests {
     use super::*;
     #[test]
-    fn merges_sources_by_identity_without_merging_same_named_devices() {
-        let mut scan = Scan::default();
-        let mut a = Device::new("bt:one".into(), "Mouse".into(), Kind::Mouse, "BlueZ");
-        a.reading.percent = Some(0);
-        scan.insert(a);
-        let mut b = Device::new("bt:one".into(), "Mouse".into(), Kind::Mouse, "UPower");
-        b.reading.level = Some("Низкий".into());
-        scan.insert(b);
-        scan.insert(Device::new(
-            "bt:two".into(),
-            "Mouse".into(),
-            Kind::Mouse,
-            "BlueZ",
-        ));
-        assert_eq!(scan.devices.len(), 2);
-        assert_eq!(scan.devices[0].reading.text(), "0%");
-        assert!(scan.devices[0].reading.low());
-        assert_eq!(scan.devices[1].reading.text(), "Нет данных");
+    fn charge_bands_preserve_boundaries_and_text_levels() {
+        for (percent, expected) in [
+            (100, Band::Full),
+            (99, Band::High),
+            (75, Band::High),
+            (51, Band::High),
+            (50, Band::Medium),
+            (26, Band::Medium),
+            (25, Band::Low),
+            (0, Band::Low),
+        ] {
+            assert_eq!(
+                Reading {
+                    percent: Some(percent),
+                    ..Default::default()
+                }
+                .band(),
+                Some(expected)
+            );
+        }
+        let mut coarse = Reading {
+            level: Some("Низкий".into()),
+            ..Default::default()
+        };
+        assert!(coarse.low(0));
+        assert_eq!(coarse.band(), Some(Band::Low));
+        coarse.charging = true;
+        assert!(!coarse.low(100));
+        assert_eq!(Reading::default().band(), None);
         assert_eq!(address("AA_BB_CC_DD_EE_FF"), address("aa:bb:cc:dd:ee:ff"));
         assert!(address("aa:bb:cc:dd:ee:ff:00").is_none());
     }

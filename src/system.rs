@@ -68,9 +68,6 @@ fn sysfs(scan: &mut Scan, folder: &Path) {
             Kind::from_name(&name),
             "Linux power_supply",
         );
-        device
-            .keys
-            .push(format!("native:{}", entry.file_name().to_string_lossy()));
         device.reading.charging = read(&path, "status") == "Charging";
         device.reading.level = match read(&path, "capacity_level").as_str() {
             "Critical" => Some("Критический"),
@@ -158,26 +155,21 @@ fn upower_device(path: &str, props: &Props) -> Option<Device> {
     } else {
         model
     };
-    let native = string(props, "NativePath");
     let serial = string(props, "Serial");
-    let native_name = Path::new(&native)
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let battery_path = Path::new("/sys/class/power_supply").join(native_name.as_ref());
-    let key = address(&serial)
-        .or_else(|| native_name.strip_prefix("dev_").and_then(address))
-        .unwrap_or_else(|| {
-            if battery_path.exists() {
-                power_key(&battery_path)
-            } else {
-                format!("upower:{path}")
-            }
-        });
+    let native = string(props, "NativePath");
+    let native_name = Path::new(&native).file_name().unwrap_or_default();
+    let battery_path = Path::new("/sys/class/power_supply").join(native_name);
+    // UPower's object path may contain a renumbered hidpp_battery_N node.
+    let key = address(&serial).unwrap_or_else(|| {
+        if !serial.is_empty() {
+            format!("serial:{serial}:{name}")
+        } else if battery_path.exists() {
+            power_key(&battery_path)
+        } else {
+            path.to_owned()
+        }
+    });
     let mut device = Device::new(key, name, kind, "UPower");
-    if !native_name.is_empty() {
-        device.keys.push(format!("native:{native_name}"));
-    }
     device.reading = Reading {
         percent: if number(props, "BatteryLevel") == 1 {
             props
@@ -324,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn dbus_sources_merge_one_physical_mouse_and_keep_real_zero() {
+    fn dbus_sources_remain_separate_and_keep_real_zero() {
         use std::io::{BufRead, BufReader};
         struct Bus(std::process::Child);
         impl Drop for Bus {
@@ -361,9 +353,12 @@ mod tests {
             let mut scan = Scan::default();
             upower(&client, &mut scan).await.unwrap();
             bluez(&client, &mut scan).await.unwrap();
-            assert_eq!(scan.devices.len(), 1);
-            assert_eq!(scan.devices[0].reading.text(), "0%");
-            assert_eq!(scan.devices[0].kind, Kind::Mouse);
+            assert_eq!(scan.devices.len(), 2);
+            assert_ne!(scan.devices[0].id, scan.devices[1].id);
+            assert!(scan.devices[0].id.contains("aa:bb:cc:dd:ee:ff"));
+            assert_eq!(scan.devices[0].reading.text(), "Низкий");
+            assert_eq!(scan.devices[1].reading.text(), "0%");
+            assert_eq!(scan.devices[1].kind, Kind::Mouse);
         });
     }
     #[test]

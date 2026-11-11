@@ -236,9 +236,50 @@ fn load_slint_image(path: &Path) -> Option<slint::Image> {
     }
 }
 
-pub fn tray() -> Vec<ksni::Icon> {
-    let bytes = include_bytes!("../ui/icons/battery.svg");
-    let Ok(tree) = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()) else {
+pub fn tray_svg(
+    band: Option<crate::device::Band>,
+    orientation: u8,
+    colored: bool,
+    dark: bool,
+) -> String {
+    use crate::device::Band;
+    let ink = if dark { "#fcfcfc" } else { "#232629" };
+    let fill = if !colored {
+        ink
+    } else {
+        match band {
+            Some(Band::Low) => "#da4453",
+            Some(Band::Medium) => "#fdbc4b",
+            _ => "#27ae60",
+        }
+    };
+    let angle = match orientation {
+        0 => 90,
+        1 => 270,
+        3 => 180,
+        _ => 0,
+    };
+    let content = match band {
+        Some(band) => {
+            let height = band as u8 as f32 * 3.5;
+            format!("<rect x=\"8\" y=\"{}\" width=\"8\" height=\"{height}\" rx=\"0.5\" fill=\"{fill}\"/>", 20.0 - height)
+        }
+        None => format!("<path d=\"M10 13h4\" stroke=\"{ink}\" stroke-width=\"1.5\"/>"),
+    };
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g transform="rotate({angle} 12 12)"><rect x="6" y="4" width="12" height="18" rx="1.5" fill="none" stroke="{ink}" stroke-width="1.6"/><rect x="10" y="1" width="4" height="2" rx="0.5" fill="{ink}"/>{content}</g></svg>"#
+    )
+}
+
+pub fn tray(
+    band: Option<crate::device::Band>,
+    orientation: u8,
+    colored: bool,
+    dark: bool,
+) -> Vec<ksni::Icon> {
+    let svg = tray_svg(band, orientation, colored, dark);
+    let Ok(tree) = resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
+    else {
         return vec![];
     };
     [22, 32, 48]
@@ -265,4 +306,30 @@ pub fn tray() -> Vec<ksni::Icon> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::Band;
+    #[test]
+    fn tray_raster_has_all_orientations_and_theme_contrast() {
+        for orientation in 0..4 {
+            for dark in [false, true] {
+                for colored in [false, true] {
+                    let icons = tray(Some(Band::Low), orientation, colored, dark);
+                    assert_eq!(icons.len(), 3);
+                    assert!(icons
+                        .iter()
+                        .all(|i| i.data.len() == (i.width * i.height * 4) as usize));
+                    let svg = tray_svg(Some(Band::Low), orientation, colored, dark);
+                    assert_eq!(svg.contains("#da4453"), colored);
+                    assert!(svg.contains(if dark { "#fcfcfc" } else { "#232629" }));
+                }
+            }
+        }
+        assert!(tray_svg(Some(Band::Medium), 2, true, false).contains("#fdbc4b"));
+        assert!(tray_svg(Some(Band::Full), 2, true, false).contains("height=\"14\""));
+        assert!(!tray(None, 2, true, false).is_empty());
+    }
 }

@@ -4,7 +4,7 @@
 
   [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-  <p>A native Linux tray battery monitor using Rust, Slint and FemtoVG. System battery services come first; supported USB receivers provide a fallback. One window, no browser engine.</p>
+  <p>A native Linux tray battery monitor using Rust, Slint and FemtoVG. Each battery source is listed separately; you choose which devices to show. One window, no browser engine.</p>
 </div>
 
 ---
@@ -16,11 +16,13 @@
 
 ## Features
 
-- Device type and name on the left, battery percentage or reported level on the right. Charging and approximate readings are marked explicitly; missing data is never displayed as `0%`.
+- Only added devices are shown, with a centered type icon and a customizable name on the left, battery percentage or reported level on the right. Charging and approximate readings are marked explicitly; missing data is never displayed as `0%`.
 - KDE colors, fonts, icon theme, rounded popup, slide animation and pin behavior reuse `yoin` conventions. KWin positions the popup beside the panel; other compositors choose the placement themselves.
-- Background refresh every 30 seconds through Linux `power_supply`, BlueZ `Battery1` and UPower. Multiple sources for the same physical device are merged; identical names alone are not merged. Disconnected devices disappear on refresh; readings are not persisted between runs.
+- Background refresh every 30 seconds through Linux `power_supply`, BlueZ `Battery1` and UPower. Sources are never merged or switched automatically: each discovered source is a separate choice. Added devices keep their last readings when disconnected, including across application restarts.
 - Read-only HID battery queries for ZAOPIN Z2 Max Compx receivers, Logitech G304/G305 `HID++`, MCHOSE V9 PRO and passive Bluetooth Xbox-compatible reports from supported 8BitDo/Xbox identities. CIY Tester 68 and other peripherals work when the system supplies their battery reading. Unknown receivers are never queried.
-- System, light and dark themes; the selection is saved in `~/.config/shinpi/config.json` (or under `XDG_CONFIG_HOME`). One graphical instance per user.
+- The tray battery shows the lowest reported band among added devices, including saved readings. Color mode is the default: `100%` full green, `51–99%` three-quarter green, `26–50%` half yellow, `0–25%` quarter red. A reported low or critical text level is red. Monochrome mode uses the same fill steps with theme contrast; unknown readings have no colored fill. Four orientations are available: horizontal, horizontal reversed, vertical and vertical reversed.
+- Low-battery notifications are enabled by default at `≤15%`, with one shared repeat interval of 60 minutes. Settings allow `0–100%` and `1–10080` minutes. Text-only low/critical levels ignore the percentage threshold. Charging and disconnected sources do not trigger alerts. Successful notification times are saved to avoid immediate repeats after restart.
+- System, light and dark themes, device choices, custom names/icons and last readings are saved in `~/.config/shinpi/config.json` (`0600`, or under `XDG_CONFIG_HOME`). One graphical instance per user.
 
 ---
 
@@ -31,7 +33,11 @@
 | Left click on tray | Open or close the device window. |
 | Right click on tray | Refresh, Settings or Quit. |
 | Refresh icon | Request a fresh scan without closing the window. |
-| Gear icon | Open theme settings and source diagnostics. |
+| Gear icon | Open appearance, notifications, added devices and diagnostics. |
+| `Add` in the empty popup | Open Settings and the device picker. Hidden once a device is added; returns when all devices are removed. |
+| `Add` in Settings | Open discovered devices with their source and current charge; add the preferred variant. |
+| Pencil in Settings | Edit the device name and type icon. |
+| Remove in Settings | Remove that device from the display; it can be added again later. |
 | Pin icon | Keep the popup open when focus moves elsewhere. |
 | `Escape` | Close the unpinned popup. |
 | `Tab`, `Enter`, `Space` | Focus and activate toolbar controls. |

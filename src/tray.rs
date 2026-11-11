@@ -1,12 +1,23 @@
 use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Command {
     Toggle,
     Dismiss,
     Refresh,
     Settings,
     Quit,
+    Add,
+    Select(usize),
+    Edit(usize),
+    Remove(usize),
+    SaveEdit(String, usize),
+    Theme(i32),
+    Orientation(u8),
+    Colored(bool),
+    Notifications(bool),
+    Threshold(u8),
+    Repeat(u32),
 }
 
 pub struct Tray {
@@ -46,7 +57,7 @@ impl ksni::Tray for Tray {
             ksni::menu::StandardItem {
                 label: label.into(),
                 activate: Box::new(move |this: &mut Self| {
-                    let _ = this.sender.send(command);
+                    let _ = this.sender.send(command.clone());
                 }),
                 ..Default::default()
             }

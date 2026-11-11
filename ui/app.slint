@@ -1,6 +1,6 @@
 // UI conventions adapted from yoin, Copyright (C) 2026 yrmuq.
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Button, ComboBox, Palette, ScrollView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox, TabWidget } from "std-widgets.slint";
 
 export struct DeviceRow {
     name: string,
@@ -9,6 +9,7 @@ export struct DeviceRow {
     icon: image,
     tint: bool,
     low: bool,
+    added: bool,
 }
 
 // Colors are filled from the active KDE scheme. Defaults are current Breeze Light.
@@ -88,6 +89,44 @@ component BreezeIcon inherits Rectangle {
 }
 
 
+component DeviceLine inherits Rectangle {
+    in property <DeviceRow> entry;
+    in property <bool> show-source: false;
+    height: 40px;
+    border-radius: Breeze.radius;
+    border-width: 1px;
+    border-color: Breeze.frame;
+    background: Breeze.button;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: 22px;
+            background: transparent;
+            VerticalLayout {
+                alignment: center;
+                BreezeIcon { source: root.entry.icon; tint: root.entry.tint; ink: Breeze.fg; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.entry.name; color: Breeze.fg; overflow: elide; horizontal-stretch: 1; }
+            if root.show-source: Text { text: root.entry.detail; color: Breeze.inactive; font-size: 11px; overflow: elide; }
+        }
+        Text {
+            text: root.entry.charge;
+            color: root.entry.low ? #da4453 : Breeze.fg;
+            font-weight: 600;
+            vertical-alignment: center;
+            min-width: 66px;
+            horizontal-alignment: right;
+        }
+        @children
+    }
+}
+
 export component Popup inherits Window {
     title: "shinpi-devices";
     no-frame: true;
@@ -116,6 +155,7 @@ export component Popup inherits Window {
     default-font-weight: ui-font-weight;
     changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
     callback configure();
+    callback add();
     callback pin-toggled();
     callback refresh();
     Rectangle {
@@ -162,48 +202,19 @@ export component Popup inherits Window {
                     BreezeIcon { source: root.icon-pin; tint: root.tint-pin; ink: pin-btn.active ? Breeze.selection-fg : Breeze.fg; }
                 }
             }
-            if root.rows.length == 0: Text {
-                text: root.empty-message;
-                color: Breeze.inactive;
-                wrap: word-wrap;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            if root.rows.length == 0: VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    Button { text: "Add"; clicked => { root.add(); } }
+                }
             }
             if root.rows.length > 0: ScrollView {
                 content-width: self.width;
                 VerticalLayout {
                     spacing: 6px;
-                    for row in root.rows: Rectangle {
-                        height: 40px;
-                        border-radius: Breeze.radius;
-                        border-width: 1px;
-                        border-color: touch.has-hover ? Breeze.outline : Breeze.frame;
-                        background: touch.has-hover ? Breeze.button-hover : Breeze.button;
-                        accessible-role: text;
-                        accessible-label: row.name + ": " + row.charge + ". " + row.detail;
-                        HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            spacing: 10px;
-                            BreezeIcon {
-                                source: row.icon;
-                                tint: row.tint;
-                                ink: Breeze.fg;
-                                width: 22px;
-                                height: 22px;
-                            }
-                            Text { text: row.name; color: Breeze.fg; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                            Text {
-                                text: row.charge;
-                                color: row.low ? #da4453 : Breeze.fg;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                                min-width: 66px;
-                                horizontal-alignment: right;
-                            }
-                        }
-                        touch := TouchArea { }
-                    }
+                    for row in root.rows: DeviceLine { entry: row; }
+
                 }
             }
         }
@@ -212,42 +223,218 @@ export component Popup inherits Window {
 
 export component Settings inherits Window {
     title: "shinpi";
-    width: 440px;
-    height: 340px;
-    background: Breeze.window;
+    width: 600px;
+    height: 620px;
     in-out property <bool> dark;
-    in-out property <int> theme-index;
-    in-out property <string> diagnostics;
-    in-out property <string> error;
     in-out property <string> ui-font-family: "Noto Sans";
     in-out property <length> ui-font-size: 13.333px;
     in-out property <int> ui-font-weight: 400;
     default-font-family: ui-font-family;
     default-font-size: ui-font-size;
     default-font-weight: ui-font-weight;
+    background: Breeze.window;
     changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    in-out property <[DeviceRow]> rows;
+    in-out property <int> theme-index;
+    in-out property <int> orientation;
+    in-out property <bool> colored: true;
+    in-out property <bool> notifications: true;
+    in-out property <int> threshold: 15;
+    in-out property <int> repeat-minutes: 60;
+    in-out property <image> tray-preview;
+    in-out property <string> diagnostics;
+    in-out property <string> error;
     callback theme-selected(int);
+    callback orientation-selected(int);
+    callback colored-selected(bool);
+    callback notifications-selected(bool);
+    callback threshold-selected(int);
+    callback repeat-selected(int);
+    callback add();
+    callback edit-device(int);
+    callback remove-device(int);
     callback dismiss();
     VerticalLayout {
-        padding: 16px;
-        spacing: 12px;
-        Text { text: "shinpi"; color: Breeze.fg; font-weight: 600; font-size: root.ui-font-size * 1.4; }
-        HorizontalLayout {
-            Text { text: "Тема"; color: Breeze.fg; vertical-alignment: center; }
-            ComboBox {
-                model: ["Системная", "Светлая", "Тёмная"];
-                current-index: root.theme-index;
-                selected(value) => { root.theme-selected(self.current-index); }
+        padding: 12px;
+        spacing: 10px;
+        TabWidget {
+            vertical-stretch: 1;
+            Tab {
+                title: "Общие";
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 14px;
+                    alignment: start;
+                    HorizontalLayout {
+                        Text { text: "Тема"; color: Breeze.fg; vertical-alignment: center; }
+                        ComboBox {
+                            model: ["Системная", "Светлая", "Тёмная"];
+                            current-index: root.theme-index;
+                            selected(value) => { root.theme-selected(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Положение значка"; color: Breeze.fg; vertical-alignment: center; }
+                        ComboBox {
+                            model: ["Горизонтальное", "Горизонтальное реверс", "Вертикальное", "Вертикальное реверс"];
+                            current-index: root.orientation;
+                            selected(value) => { root.orientation-selected(self.current-index); }
+                        }
+                        Image { source: root.tray-preview; width: 32px; height: 32px; }
+                    }
+                    CheckBox {
+                        text: "Цветной значок батареи";
+                        checked: root.colored;
+                        toggled => { root.colored-selected(self.checked); }
+                    }
+                    Text { text: "Монохромный значок использует контрастный цвет темы."; color: Breeze.inactive; wrap: word-wrap; }
+                    Rectangle { height: 1px; background: Breeze.frame; }
+                    CheckBox {
+                        text: "Уведомлять о низком заряде";
+                        checked: root.notifications;
+                        toggled => { root.notifications-selected(self.checked); }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Порог, ≤ %"; color: Breeze.fg; vertical-alignment: center; }
+                        SpinBox {
+                            enabled: root.notifications;
+                            minimum: 0; maximum: 100; value: root.threshold;
+                            edited(value) => { root.threshold-selected(value); }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Повторять каждые, мин"; color: Breeze.fg; vertical-alignment: center; }
+                        SpinBox {
+                            enabled: root.notifications;
+                            minimum: 1; maximum: 10080; value: root.repeat-minutes;
+                            edited(value) => { root.repeat-selected(value); }
+                        }
+                    }
+                    Text {
+                        text: "Порог и интервал общие для всех устройств.\nДля текстового низкого уровня процентный порог не применяется. Во время зарядки уведомлений нет.";
+                        color: Breeze.inactive; wrap: word-wrap;
+                    }
+                }
             }
-        }
-        Text { text: "Заряд обновляется каждые 30 секунд.\n≈ — приблизительное показание устройства."; color: Breeze.inactive; wrap: word-wrap; }
-        ScrollView {
-            Text { text: root.diagnostics; color: Breeze.fg; wrap: word-wrap; }
+            Tab {
+                title: "Устройства";
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 10px;
+                    Button { text: "Add"; clicked => { root.add(); } }
+                    if root.rows.length == 0: Text { text: "Добавьте устройства для показа в трее."; color: Breeze.inactive; wrap: word-wrap; }
+                    ScrollView {
+                        content-width: self.width;
+                        VerticalLayout {
+                            spacing: 6px;
+                            for device[i] in root.rows: DeviceLine {
+                                entry: device;
+                                show-source: true;
+                                height: 58px;
+                                ToolButton {
+                                    height: 58px;
+                                    label: "Изменить " + device.name;
+                                    clicked => { root.edit-device(i); }
+                                    BreezeIcon { source: @image-url("icons/edit.svg"); ink: Breeze.fg; }
+                                }
+                                Button { text: "Удалить"; clicked => { root.remove-device(i); } }
+                            }
+                        }
+                    }
+                }
+            }
+            Tab {
+                title: "Диагностика";
+                ScrollView {
+                    Text { text: root.diagnostics; color: Breeze.fg; wrap: word-wrap; }
+                }
+            }
         }
         if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
         HorizontalLayout {
             alignment: end;
             Button { text: "Закрыть"; clicked => { root.dismiss(); } }
+        }
+    }
+}
+
+export component AddDevices inherits Window {
+    title: "shinpi — Добавить устройства";
+    width: 620px;
+    height: 440px;
+    in-out property <bool> dark;
+    in-out property <string> ui-font-family: "Noto Sans";
+    in-out property <length> ui-font-size: 13.333px;
+    in-out property <int> ui-font-weight: 400;
+    default-font-family: ui-font-family;
+    default-font-size: ui-font-size;
+    default-font-weight: ui-font-weight;
+    background: Breeze.window;
+    changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    in-out property <[DeviceRow]> rows;
+    in-out property <bool> busy;
+    callback add-device(int);
+    callback refresh();
+    callback dismiss();
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+        Text { text: "Найденные устройства"; color: Breeze.fg; font-weight: 600; }
+        Text { text: "Каждый источник показан отдельно. Выберите подходящий вариант."; color: Breeze.inactive; wrap: word-wrap; }
+        if root.rows.length == 0: Text { text: root.busy ? "Поиск устройств…" : "Устройств не найдено. Подключите устройство и обновите список."; color: Breeze.inactive; wrap: word-wrap; }
+        ScrollView {
+            content-width: self.width;
+            VerticalLayout {
+                spacing: 6px;
+                for device[i] in root.rows: DeviceLine {
+                    entry: device;
+                    show-source: true;
+                    height: 58px;
+                    Button { text: device.added ? "Добавлено" : "Add"; enabled: !device.added; clicked => { root.add-device(i); } }
+                }
+            }
+        }
+        HorizontalLayout {
+            Button { text: "Обновить"; enabled: !root.busy; clicked => { root.refresh(); } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Button { text: "Закрыть"; clicked => { root.dismiss(); } }
+        }
+    }
+}
+
+export component DeviceEditor inherits Window {
+    title: "shinpi — Изменить устройство";
+    width: 440px;
+    height: 270px;
+    in-out property <bool> dark;
+    in-out property <string> ui-font-family: "Noto Sans";
+    in-out property <length> ui-font-size: 13.333px;
+    in-out property <int> ui-font-weight: 400;
+    default-font-family: ui-font-family;
+    default-font-size: ui-font-size;
+    default-font-weight: ui-font-weight;
+    background: Breeze.window;
+    changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    in-out property <string> device-name;
+    in-out property <int> kind-index;
+    in-out property <string> error;
+    callback save-device(string, int);
+    callback dismiss();
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        Text { text: "Название"; color: Breeze.fg; }
+        LineEdit { text <=> root.device-name; }
+        Text { text: "Значок устройства"; color: Breeze.fg; }
+        ComboBox {
+            model: ["Мышь", "Клавиатура", "Наушники", "Геймпад", "Батарея"];
+            current-index <=> root.kind-index;
+        }
+        if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            Button { text: "Отмена"; clicked => { root.dismiss(); } }
+            Button { text: "Сохранить"; clicked => { root.save-device(root.device-name, root.kind-index); } }
         }
     }
 }
