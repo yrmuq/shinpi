@@ -31,6 +31,8 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" \
     "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
     "$APPDIR/usr/share/doc/shinpi"
 cp "$BIN" "$APPDIR/usr/bin/shinpi"
+mkdir -p "$APPDIR/usr/share/shinpi/languages"
+cp "$ROOT"/languages/*.ini "$APPDIR/usr/share/shinpi/languages/"
 cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/README.md" "$PACK/BUNDLED.txt" \
     "$ROOT/ui/icons/COPYING" "$ROOT/packaging/70-shinpi.rules" \
     "$APPDIR/usr/share/doc/shinpi/"

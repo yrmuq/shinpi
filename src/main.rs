@@ -1,6 +1,7 @@
 mod config;
 mod device;
 mod hid;
+mod i18n;
 mod icons;
 mod notices;
 mod notify;
@@ -27,6 +28,7 @@ slint::include_modules!();
 
 struct State {
     config: config::Config,
+    catalog: i18n::Catalog,
     scan: device::Scan,
     opened: Instant,
     blur: Option<Instant>,
@@ -60,7 +62,7 @@ async fn scan() -> device::Scan {
         Ok(data) => data,
         Err(e) => device::Scan {
             devices: vec![],
-            warnings: vec![format!("Ошибка опроса HID: {e}")],
+            warnings: vec![format!("HID scan failed: {e}")],
         },
     }
 }
@@ -126,10 +128,6 @@ fn ensure_popup(
     }
     CREATING_PANEL.set("");
     let popup = result.map_err(|e| eprintln!("shinpi: popup: {e}")).ok()?;
-    let tx = sender.clone();
-    popup.on_refresh(move || {
-        let _ = tx.send(Command::Refresh);
-    });
     let tx = sender.clone();
     popup.on_configure(move || {
         let _ = tx.send(Command::Settings);
@@ -264,7 +262,7 @@ fn sync_notices(
         return;
     };
     if fresh {
-        paint(shell, &state.borrow().config);
+        paint(shell, &state.borrow());
         fill(shell, &state.borrow());
     }
     if !notices.window().is_visible() {
@@ -348,6 +346,10 @@ fn ensure_settings(
         let _ = tx.send(Command::SaveEdit(name.to_string(), kind as usize));
     });
     let tx = sender.clone();
+    settings.on_language_selected(move |index| {
+        let _ = tx.send(Command::Language(index as usize));
+    });
+    let tx = sender.clone();
     settings.on_theme_selected(move |index| {
         let _ = tx.send(Command::Theme(index));
     });
@@ -403,13 +405,17 @@ fn ensure_settings(
     Some(settings)
 }
 
-fn paint(shell: &Shell, cfg: &config::Config) {
+fn paint(shell: &Shell, state: &State) {
+    let cfg = &state.config;
+    let catalog = &state.catalog;
+    let labels = ModelRc::new(VecModel::from(catalog.labels()));
     let palette = theme::system_palette(&cfg.theme);
     let dark = theme::resolved(&cfg.theme, theme::system_dark()) == "dark";
     let font = theme::system_font();
     macro_rules! window_style {
         ($window:expr) => {{
             let window = $window;
+            window.global::<Translations>().set_strings(labels.clone());
             window.set_dark(dark);
             window.set_ui_font_family(font.family.clone().into());
             let scale = window.window().scale_factor().max(1.0);
@@ -440,10 +446,6 @@ fn paint(shell: &Shell, cfg: &config::Config) {
             popup.set_icon_pin(icon.image);
             popup.set_tint_pin(icon.tint);
         }
-        if let Some(icon) = icons::theme_icon("view-refresh") {
-            popup.set_icon_refresh(icon.image);
-            popup.set_tint_refresh(icon.tint);
-        }
     }
     if let Some(notices) = &shell.notices {
         window_style!(notices);
@@ -454,6 +456,23 @@ fn paint(shell: &Shell, cfg: &config::Config) {
         settings.set_panel_width(cfg.panel_width as i32);
         settings.set_history_enabled(cfg.history_enabled);
         settings.set_history_count(cfg.history_count as i32);
+        let languages = i18n::languages();
+        let mut names = vec![catalog.tr("System language").into()];
+        names.extend(
+            languages
+                .iter()
+                .map(|name| slint::SharedString::from(i18n::language_label(name))),
+        );
+        settings.set_language_names(ModelRc::new(VecModel::from(names)));
+        settings.set_language_index(if cfg.language.is_empty() {
+            0
+        } else {
+            languages
+                .iter()
+                .position(|n| n == &catalog.language)
+                .map(|i| i as i32 + 1)
+                .unwrap_or(1)
+        });
         settings.set_theme_index(match cfg.theme.as_str() {
             "light" => 1,
             "dark" => 2,
@@ -476,6 +495,7 @@ fn row(
     reading: &device::Reading,
     source: &str,
     added: bool,
+    catalog: &i18n::Catalog,
 ) -> DeviceRow {
     let themed = icons::theme_icon(kind.icon());
     let (icon, tint) = match themed {
@@ -496,7 +516,7 @@ fn row(
     };
     DeviceRow {
         name: name.into(),
-        charge: reading.text().into(),
+        charge: catalog.reading(reading).into(),
         detail: source.into(),
         icon,
         tint,
@@ -513,7 +533,7 @@ fn fill(shell: &Shell, state: &State) {
         .config
         .devices
         .iter()
-        .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true))
+        .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true, &state.catalog))
         .collect();
     if let Some(popup) = &shell.popup {
         popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
@@ -539,7 +559,7 @@ fn fill(shell: &Shell, state: &State) {
                 .map(|(index, note)| NoticeRow {
                     index: index as i32,
                     message: note.message.clone().into(),
-                    when: notices::ago(note.at, now).into(),
+                    when: notices::ago(note.at, now, &state.catalog).into(),
                     fade: note.fade,
                 })
                 .collect::<Vec<_>>(),
@@ -560,25 +580,38 @@ fn fill(shell: &Shell, state: &State) {
                 &d.reading,
                 &d.source,
                 state.config.devices.iter().any(|s| s.id == d.id),
+                &state.catalog,
             )
         })
         .collect();
     settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
     settings.set_busy(state.busy);
-    let mut diagnostics = state.scan.warnings.clone();
+    let mut diagnostics: Vec<_> = state
+        .scan
+        .warnings
+        .iter()
+        .map(|s| state.catalog.message(s))
+        .collect();
     diagnostics.extend(
         state
             .scan
             .devices
             .iter()
             .filter(|d| !d.status.is_empty())
-            .map(|d| format!("{} · {}: {}", d.name, d.source, d.status)),
+            .map(|d| {
+                format!(
+                    "{} · {}: {}",
+                    d.name,
+                    d.source,
+                    state.catalog.message(&d.status)
+                )
+            }),
     );
     if !state.notification_error.is_empty() {
-        diagnostics.push(state.notification_error.clone());
+        diagnostics.push(state.catalog.message(&state.notification_error));
     }
     settings.set_diagnostics(if diagnostics.is_empty() {
-        "Все источники опрошены.".into()
+        state.catalog.tr("All sources have been scanned.").into()
     } else {
         diagnostics.join("\n\n").into()
     });
@@ -638,9 +671,12 @@ fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, 
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let catalog = i18n::Catalog::load(&config::load().language);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help") {
-        println!("shinpi [--window | --once | --print-udev-rules]\n  --window             Открыть окно при запуске\n  --once               Напечатать текущие показания в JSON без GUI\n  --print-udev-rules   Напечатать правила доступа к поддерживаемым HID");
+        println!("shinpi [--window | --once | --print-udev-rules]\n  --window             {}\n  --once               {}\n  --print-udev-rules   {}\n  --help               {}",
+            catalog.tr("Open the popup at startup"), catalog.tr("Print current readings as JSON without starting the GUI"),
+            catalog.tr("Print access rules for supported HID devices"), catalog.tr("Show help"));
         return Ok(());
     }
     if args.iter().any(|a| a == "--print-udev-rules") {
@@ -651,7 +687,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .any(|a| !matches!(a.as_str(), "--once" | "--window"))
     {
-        return Err("Неизвестный параметр. См. --help".into());
+        return Err(catalog.tr("Unknown argument. See --help").into());
     }
     let runtime = tokio::runtime::Runtime::new()?;
     if args.iter().any(|a| a == "--once") {
@@ -673,6 +709,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shell = Rc::new(RefCell::new(Shell::default()));
     let state = Rc::new(RefCell::new(State {
         config: config::load(),
+        catalog,
         scan: device::Scan::default(),
         opened: Instant::now(),
         blur: None,
@@ -688,6 +725,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (sender, mut commands) = tokio::sync::mpsc::unbounded_channel();
     let (refresh, mut refresh_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let (results_tx, results) = std::sync::mpsc::channel();
+    let initial_summary = state.borrow().catalog.tr("Scanning for devices…");
+    let initial_labels =
+        ["Refresh", "Settings", "Quit"].map(|label| state.borrow().catalog.tr(label));
     let tray = runtime.block_on(async {
         use ksni::TrayMethods;
         tray::Tray {
@@ -701,7 +741,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     theme::resolved(&cfg.theme, theme::system_dark()) == "dark",
                 )
             },
-            summary: "Поиск устройств…".into(),
+            summary: initial_summary,
+            labels: initial_labels,
         }
         .assume_sni_available(true)
         .spawn()
@@ -753,9 +794,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         last_toggle.set(Instant::now());
                         if let Some(popup) = ensure_popup(&mut windows, &data, &tx) {
-                            paint(&windows, &data.borrow().config);
+                            paint(&windows, &data.borrow());
                             fill(&windows, &data.borrow());
                             let open = !popup.window().is_visible() || data.borrow().closing;
+                            if open && !data.borrow().busy {
+                                data.borrow_mut().busy = true;
+                                let _ = refresh.send(());
+                            }
                             animate(&popup, &data, &slide, open);
                         }
                     }
@@ -780,7 +825,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         if let Some(settings) = ensure_settings(&mut windows, &tx) {
-                            paint(&windows, &data.borrow().config);
+                            paint(&windows, &data.borrow());
                             fill(&windows, &data.borrow());
                             settings.show().ok();
                             let _ = settings.window().with_winit_window(|w| {
@@ -822,7 +867,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(settings) = &windows.settings {
                             let name: String = name.trim().chars().take(80).collect();
                             if name.is_empty() {
-                                settings.set_edit_error("Введите название устройства.".into());
+                                settings.set_edit_error(
+                                    data.borrow().catalog.tr("Enter a device name.").into(),
+                                );
                             } else {
                                 let mut state = data.borrow_mut();
                                 let id = state.editing.clone();
@@ -845,6 +892,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 settings.invoke_close_editor();
                             }
                         }
+                    }
+                    Command::Language(index) => {
+                        let language = index
+                            .checked_sub(1)
+                            .and_then(|i| i18n::languages().get(i).cloned())
+                            .unwrap_or_default();
+                        let mut state = data.borrow_mut();
+                        state.config.language = language;
+                        state.catalog = i18n::Catalog::load(&state.config.language);
+                        changed = true;
                     }
                     Command::Theme(index) => {
                         data.borrow_mut().config.theme = match index {
@@ -916,12 +973,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
-                        for (id, message) in notify::due(&state.config, &result, now) {
+                        for (id, message) in
+                            notify::due(&state.config, &result, now, &state.catalog)
+                        {
                             if state.pending_notifications.insert(id.clone()) {
                                 let tx = notification_tx.clone();
+                                let title = state.catalog.tr("Low device battery");
                                 rt_handle.spawn(async move {
-                                    let result =
-                                        notify::send(&message).await.map_err(|e| e.to_string());
+                                    let result = notify::send(&title, &message)
+                                        .await
+                                        .map_err(|e| e.to_string());
                                     let _ = tx.send(Event::Notified(id, now, message, result));
                                 });
                             }
@@ -947,7 +1008,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Err(error) => {
                                 state.notification_error =
-                                    format!("Уведомления недоступны: {error}")
+                                    format!("Notifications unavailable: {error}")
                             }
                         }
                     }
@@ -962,7 +1023,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if changed {
                 let error = config::save(&data.borrow().config)
                     .err()
-                    .map(|e| format!("Не удалось сохранить настройки: {e}"))
+                    .map(|e| {
+                        data.borrow()
+                            .catalog
+                            .trf("Could not save settings: {}", &[&e.to_string()])
+                    })
                     .unwrap_or_default();
                 if !error.is_empty() {
                     eprintln!("shinpi: {error}");
@@ -974,7 +1039,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if changed || redraw || last_theme.get().elapsed() >= Duration::from_secs(2) {
                 last_theme.set(Instant::now());
                 let state = data.borrow();
-                paint(&windows, &state.config);
+                paint(&windows, &state);
                 fill(&windows, &state);
             }
             {
@@ -990,19 +1055,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     last_icon.set(Some(signature));
                     let icons = icons::tray(signature.0, signature.1, signature.2, signature.3);
                     let summary = if cfg.devices.is_empty() {
-                        "Добавьте устройства".into()
+                        state.catalog.tr("Add devices")
                     } else {
                         cfg.devices
                             .iter()
-                            .map(|d| format!("{}: {}", d.name, d.reading.text()))
+                            .map(|d| format!("{}: {}", d.name, state.catalog.reading(&d.reading)))
                             .collect::<Vec<_>>()
                             .join("\n")
                     };
+                    let labels =
+                        ["Refresh", "Settings", "Quit"].map(|label| state.catalog.tr(label));
                     let tray = tray.clone();
                     rt_handle.spawn(async move {
                         tray.update(move |t| {
                             t.icons = icons;
                             t.summary = summary;
+                            t.labels = labels;
                         })
                         .await;
                     });

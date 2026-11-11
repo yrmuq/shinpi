@@ -58,7 +58,7 @@ fn sysfs(scan: &mut Scan, folder: &Path) {
         }
         let model = read(&path, "model_name");
         let name = if model.is_empty() {
-            "Беспроводное устройство".into()
+            "Wireless device".into()
         } else {
             model
         };
@@ -115,7 +115,7 @@ async fn bluez(connection: &zbus::Connection, scan: &mut Scan) -> zbus::Result<(
             alias
         };
         let name = if name.is_empty() || address(&name).is_some() {
-            "Устройство Bluetooth".into()
+            "Bluetooth device".into()
         } else {
             name
         };
@@ -151,7 +151,7 @@ fn upower_device(path: &str, props: &Props) -> Option<Device> {
     };
     let model = string(props, "Model");
     let name = if model.trim().is_empty() {
-        "Беспроводное устройство".into()
+        "Wireless device".into()
     } else {
         model
     };
@@ -241,9 +241,7 @@ pub async fn scan() -> Scan {
                 scan.warnings.push(format!("BlueZ: {e}"));
             }
         }
-        Err(e) => scan
-            .warnings
-            .push(format!("Системный D-Bus недоступен: {e}")),
+        Err(e) => scan.warnings.push(format!("System D-Bus unavailable: {e}")),
     }
     scan
 }

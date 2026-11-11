@@ -7,6 +7,7 @@
 - `src/config.rs` — настройки, выбранные источники, последние показания, история и время уведомлений в `~/.config/shinpi/config.json`.
 - `src/notices.rs` — последние 20 уведомлений, время записей и анимация удаления.
 - `src/notify.rs` — общий порог/интервал и уведомления через `org.freedesktop.Notifications`.
+- `src/i18n.rs`, `languages/*.ini` — English/русский, системная локаль, ручной выбор и внешние переводы.
 - `src/theme.rs`, `src/icons.rs` — темы, шрифты KDE и значки.
 - `src/tray.rs` — StatusNotifier через `ksni`.
 - `src/place.rs`, `kwin/placer.js` — размещение связанных панелей устройств и уведомлений у панели KWin.

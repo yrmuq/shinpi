@@ -17,12 +17,13 @@
 ## Features
 
 - Only added devices are shown, with a centered type icon and a customizable name on the left, battery percentage or reported level on the right. Charging and approximate readings are marked explicitly; missing data is never displayed as `0%`.
+- English and Russian interfaces with automatic system-language detection and a manual language selector. Translations live in `languages/*.ini` and are included in the AppImage; `SHINPI_LANGUAGES` can point to an external translation folder.
 - KDE colors, fonts and icon theme, with a rounded popup, slide animation and pin control. KWin positions the popup beside the panel; other compositors choose the placement themselves. Only Settings has a taskbar entry; its device picker and editor are child dialogs. Settings and dialogs have fixed sizes; diagnostics wrap and scroll within the window.
 - Background refresh every 30 seconds through Linux `power_supply`, BlueZ `Battery1` and UPower. Sources are never merged or switched automatically: each discovered source is a separate choice. Added devices keep their last readings when disconnected, including across application restarts.
 - Read-only HID battery queries for ZAOPIN Z2 Max Compx receivers, Logitech G304/G305 `HID++`, MCHOSE V9 PRO and passive Bluetooth Xbox-compatible reports from supported 8BitDo/Xbox identities. CIY Tester 68 and other peripherals work when the system supplies their battery reading. Unknown receivers are never queried.
 - The tray battery shows the lowest reported band among added devices, including saved readings. Color mode is the default: `100%` full green, `51–99%` three-quarter green, `26–50%` half yellow, `0–25%` quarter red. A reported low or critical text level is red. Monochrome mode uses the same fill steps with theme contrast; unknown readings have no colored fill. Four orientations are available: horizontal, horizontal reversed, vertical and vertical reversed.
 - Low-battery notifications are enabled by default at `≤15%`, with one shared repeat interval of 60 minutes. Settings allow `0–100%` and `1–10080` minutes. Text-only low/critical levels ignore the percentage threshold. Charging and disconnected sources do not trigger alerts. Successful notification times are saved to avoid immediate repeats after restart.
-- Optional notification history above the device popup, with relative times and individual dismissal. Both panels share a configurable width of `280–800` pixels. Show the latest `1–20` records (three by default), collapse them with the triangle or disable the history panel. The last 20 delivered low-battery notifications are saved independently of panel visibility.
+- Optional notification history above the device popup, with relative times and individual dismissal. Both panels share a configurable width of `280–800` pixels (`300` by default). Show the latest `1–20` records (three by default), collapse them with the triangle or disable the history panel. The last 20 delivered low-battery notifications are saved independently of panel visibility.
 - System, light and dark themes, device choices, custom names/icons and last readings are saved in `~/.config/shinpi/config.json` (`0600`, or under `XDG_CONFIG_HOME`). One graphical instance per user.
 
 ---
@@ -31,10 +32,10 @@
 
 | Input | Action |
 | --- | --- |
-| Left click on tray | Open or close the device window. |
+| Left click on tray | Open or close the device window; opening requests fresh readings. |
 | Right click on tray | Refresh, Settings or Quit. |
-| Refresh icon | Request a fresh scan without closing the window. |
-| Gear icon | Open appearance, panels, notifications, added devices and diagnostics. |
+| Language in Settings | Follow the system locale or select English/Russian; the choice is saved. |
+| Gear icon | Open language, appearance, panels, notifications, added devices and diagnostics. |
 | Triangle | Show or hide notification history; absent when the history panel is disabled. |
 | `×` on a history record | Dismiss that record. |
 | Panels tab in Settings | Set the shared width, history visibility and number of displayed records. |

@@ -6,6 +6,7 @@ use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 #[serde(default)]
 pub struct Config {
     pub theme: String,
+    pub language: String,
     pub tray_orientation: u8,
     pub colored_icon: bool,
     pub notifications: bool,
@@ -23,12 +24,13 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: String::new(),
+            language: String::new(),
             tray_orientation: 2,
             colored_icon: true,
             notifications: true,
             low_threshold: 15,
             repeat_minutes: 60,
-            panel_width: 360,
+            panel_width: 300,
             history_enabled: true,
             history_hidden: false,
             history_count: 3,
@@ -151,7 +153,7 @@ mod tests {
         let mut config: Config = serde_json::from_str("{\"theme\":\"dark\"}").unwrap();
         assert!(config.devices.is_empty());
         assert!(config.colored_icon);
-        assert_eq!(config.panel_width, 360);
+        assert_eq!(config.panel_width, 300);
         assert_eq!(config.history_count, 3);
         assert!(config.history_enabled && !config.history_hidden);
         assert!(config.history.is_empty());

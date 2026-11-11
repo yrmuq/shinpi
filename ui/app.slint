@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox, TabWidget } from "std-widgets.slint";
 
+export global Translations {
+    in-out property <[string]> strings;
+    public pure function tr(index: int) -> string { return strings[index]; }
+}
+
 export struct DeviceRow {
     name: string,
     charge: string,
@@ -142,7 +147,7 @@ export component Popup inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    in-out property <int> panel-width: 360;
+    in-out property <int> panel-width: 300;
     in-out property <bool> history-enabled: true;
     in-out property <bool> history-hidden: false;
     callback history-toggled();
@@ -157,13 +162,10 @@ export component Popup inherits Window {
     in-out property <string> ui-font-family: "Noto Sans";
     in-out property <length> ui-font-size: 13.333px;
     in-out property <int> ui-font-weight: 400;
-    in-out property <string> empty-message: "Поиск устройств…";
     in-out property <image> icon-configure: @image-url("icons/configure.svg");
     in-out property <image> icon-pin: @image-url("icons/window-pin.svg");
-    in-out property <image> icon-refresh: @image-url("icons/refresh.svg");
     in-out property <bool> tint-configure: true;
     in-out property <bool> tint-pin: true;
-    in-out property <bool> tint-refresh: true;
     default-font-family: ui-font-family;
     default-font-size: ui-font-size;
     default-font-weight: ui-font-weight;
@@ -171,7 +173,6 @@ export component Popup inherits Window {
     callback configure();
     callback add();
     callback pin-toggled();
-    callback refresh();
     Rectangle {
         y: root.slide;
         width: parent.width;
@@ -189,16 +190,17 @@ export component Popup inherits Window {
                 background: transparent;
                 Text {
                     x: 8px;
-                    width: parent.width - (root.history-enabled ? 152px : 116px);
+                    width: root.history-enabled ? (parent.width - 32px) / 2 - 16px : parent.width - 84px;
+                    overflow: elide;
                     height: parent.height;
-                    text: "Устройства";
+                    text: Translations.tr(1);
                     color: Breeze.fg;
                     vertical-alignment: center;
                     font-weight: 600;
                 }
                 if root.history-enabled: ToolButton {
-                    x: parent.width - 140px;
-                    label: root.history-hidden ? "Показать уведомления" : "Скрыть уведомления";
+                    x: (parent.width - self.width) / 2;
+                    label: root.history-hidden ? Translations.tr(2) : Translations.tr(3);
                     clicked => { root.history-toggled(); }
                     Path {
                         width: 12px; height: 12px;
@@ -208,20 +210,14 @@ export component Popup inherits Window {
                     }
                 }
                 ToolButton {
-                    x: parent.width - 104px;
-                    label: "Обновить";
-                    clicked => { if (!root.busy) { root.refresh(); } }
-                    BreezeIcon { source: root.icon-refresh; tint: root.tint-refresh; ink: root.busy ? Breeze.inactive : Breeze.fg; }
-                }
-                ToolButton {
                     x: parent.width - 68px;
-                    label: "Настройки";
+                    label: Translations.tr(4);
                     clicked => { root.configure(); }
                     BreezeIcon { source: root.icon-configure; tint: root.tint-configure; ink: Breeze.fg; }
                 }
                 pin-btn := ToolButton {
                     x: parent.width - 32px;
-                    label: "Закрепить окно";
+                    label: Translations.tr(5);
                     active: root.pinned;
                     clicked => { root.pin-toggled(); }
                     BreezeIcon { source: root.icon-pin; tint: root.tint-pin; ink: pin-btn.active ? Breeze.selection-fg : Breeze.fg; }
@@ -231,7 +227,7 @@ export component Popup inherits Window {
                 alignment: center;
                 HorizontalLayout {
                     alignment: center;
-                    Button { text: "Add"; clicked => { root.add(); } }
+                    Button { text: Translations.tr(6); clicked => { root.add(); } }
                 }
             }
             if root.rows.length > 0: ScrollView {
@@ -261,7 +257,7 @@ export component Notices inherits Window {
     default-font-weight: ui-font-weight;
     changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
     in-out property <[NoticeRow]> notes;
-    in-out property <int> panel-width: 360;
+    in-out property <int> panel-width: 300;
     in-out property <length> available-height: 360px;
     in-out property <bool> expanded: false;
     out property <length> slide: expanded ? 0px : root.height;
@@ -300,13 +296,13 @@ export component Notices inherits Window {
                             height: parent.height;
                             alignment: center;
                             spacing: 0px;
-                            Text { text: "Низкий заряд устройства"; color: Breeze.fg; font-weight: 600; overflow: elide; min-width: 0px; height: 18px; }
+                            Text { text: Translations.tr(7); color: Breeze.fg; font-weight: 600; overflow: elide; min-width: 0px; height: 18px; }
                             Text { text: note.message; color: Breeze.fg; overflow: elide; min-width: 0px; height: 18px; }
                             Text { text: note.when; color: Breeze.inactive; overflow: elide; min-width: 0px; font-size: root.ui-font-size * 0.85; height: 16px; }
                         }
                         ToolButton {
                             x: parent.width - 32px;
-                            label: "Удалить уведомление";
+                            label: Translations.tr(8);
                             clicked => { root.dismiss-note(note.index); }
                             Text { text: "×"; color: Breeze.inactive; font-size: 18px; }
                         }
@@ -333,9 +329,9 @@ component AddDevices inherits Rectangle {
     VerticalLayout {
         padding: 12px;
         spacing: 10px;
-        Text { text: "Найденные устройства"; color: Breeze.fg; font-weight: 600; }
-        Text { text: "Каждый источник показан отдельно. Выберите подходящий вариант."; color: Breeze.inactive; wrap: word-wrap; }
-        if root.rows.length == 0: Text { text: root.busy ? "Поиск устройств…" : "Устройств не найдено. Подключите устройство и обновите список."; color: Breeze.inactive; wrap: word-wrap; }
+        Text { text: Translations.tr(9); color: Breeze.fg; font-weight: 600; }
+        Text { text: Translations.tr(10); color: Breeze.inactive; wrap: word-wrap; }
+        if root.rows.length == 0: Text { text: root.busy ? Translations.tr(11) : Translations.tr(12); color: Breeze.inactive; wrap: word-wrap; }
         ScrollView {
             content-width: self.visible-width;
             VerticalLayout {
@@ -347,7 +343,7 @@ component AddDevices inherits Rectangle {
                     ToolButton {
                         height: 58px;
                         active: device.added;
-                        label: device.added ? "Устройство добавлено" : "Добавить " + device.name;
+                        label: device.added ? Translations.tr(13) : Translations.tr(6) + " " + device.name;
                         clicked => { if (!device.added) { root.add-device(i); } }
                         Text { text: device.added ? "✓" : "+"; font-size: 24px; color: device.added ? Breeze.selection-fg : Breeze.fg; }
                     }
@@ -355,9 +351,9 @@ component AddDevices inherits Rectangle {
             }
         }
         HorizontalLayout {
-            Button { text: "Обновить"; enabled: !root.busy; clicked => { root.refresh(); } }
+            Button { text: Translations.tr(14); enabled: !root.busy; clicked => { root.refresh(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            Button { text: "Закрыть"; clicked => { root.dismiss(); } }
+            Button { text: Translations.tr(15); clicked => { root.dismiss(); } }
         }
     }
 }
@@ -378,18 +374,18 @@ component DeviceEditor inherits Rectangle {
     VerticalLayout {
         padding: 16px;
         spacing: 12px;
-        Text { text: "Название"; color: Breeze.fg; }
+        Text { text: Translations.tr(16); color: Breeze.fg; }
         LineEdit { text <=> root.device-name; }
-        Text { text: "Значок устройства"; color: Breeze.fg; }
+        Text { text: Translations.tr(17); color: Breeze.fg; }
         ComboBox {
-            model: ["Мышь", "Клавиатура", "Наушники", "Геймпад", "Батарея"];
+            model: [Translations.tr(18), Translations.tr(19), Translations.tr(20), Translations.tr(21), Translations.tr(22)];
             current-index <=> root.kind-index;
         }
         if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
         HorizontalLayout {
             alignment: end;
-            Button { text: "Отмена"; clicked => { root.dismiss(); } }
-            Button { text: "Сохранить"; clicked => { root.save-device(root.device-name, root.kind-index); } }
+            Button { text: Translations.tr(23); clicked => { root.dismiss(); } }
+            Button { text: Translations.tr(24); clicked => { root.save-device(root.device-name, root.kind-index); } }
         }
     }
 }
@@ -416,7 +412,7 @@ export component Settings inherits Window {
     in-out property <int> theme-index;
     in-out property <int> orientation;
     in-out property <bool> colored: true;
-    in-out property <int> panel-width: 360;
+    in-out property <int> panel-width: 300;
     in-out property <bool> history-enabled: true;
     in-out property <int> history-count: 3;
     callback panel-width-selected(int);
@@ -428,6 +424,9 @@ export component Settings inherits Window {
     in-out property <image> tray-preview;
     in-out property <string> diagnostics;
     in-out property <string> error;
+    in-out property <[string]> language-names;
+    in-out property <int> language-index;
+    callback language-selected(int);
     callback theme-selected(int);
     callback orientation-selected(int);
     callback colored-selected(bool);
@@ -484,42 +483,50 @@ export component Settings inherits Window {
         TabWidget {
             vertical-stretch: 1;
             Tab {
-                title: "Общие";
+                title: Translations.tr(25);
                 VerticalLayout {
                     padding: 12px;
                     spacing: 14px;
                     alignment: start;
                     HorizontalLayout {
-                        Text { text: "Тема"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(51); color: Breeze.fg; vertical-alignment: center; }
                         ComboBox {
-                            model: ["Системная", "Светлая", "Тёмная"];
+                            model: root.language-names;
+                            current-index: root.language-index;
+                            selected(value) => { root.language-selected(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        Text { text: Translations.tr(26); color: Breeze.fg; vertical-alignment: center; }
+                        ComboBox {
+                            model: [Translations.tr(27), Translations.tr(28), Translations.tr(29)];
                             current-index: root.theme-index;
                             selected(value) => { root.theme-selected(self.current-index); }
                         }
                     }
                     HorizontalLayout {
-                        Text { text: "Положение значка"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(30); color: Breeze.fg; vertical-alignment: center; }
                         ComboBox {
-                            model: ["Горизонтальное", "Горизонтальное реверс", "Вертикальное", "Вертикальное реверс"];
+                            model: [Translations.tr(31), Translations.tr(32), Translations.tr(33), Translations.tr(34)];
                             current-index: root.orientation;
                             selected(value) => { root.orientation-selected(self.current-index); }
                         }
                         Image { source: root.tray-preview; width: 32px; height: 32px; }
                     }
                     CheckBox {
-                        text: "Цветной значок батареи";
+                        text: Translations.tr(35);
                         checked: root.colored;
                         toggled => { root.colored-selected(self.checked); }
                     }
-                    Text { text: "Монохромный значок использует контрастный цвет темы."; color: Breeze.inactive; wrap: word-wrap; }
+                    Text { text: Translations.tr(36); color: Breeze.inactive; wrap: word-wrap; }
                     Rectangle { height: 1px; background: Breeze.frame; }
                     CheckBox {
-                        text: "Уведомлять о низком заряде";
+                        text: Translations.tr(37);
                         checked: root.notifications;
                         toggled => { root.notifications-selected(self.checked); }
                     }
                     HorizontalLayout {
-                        Text { text: "Порог, ≤ %"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(38); color: Breeze.fg; vertical-alignment: center; }
                         SpinBox {
                             enabled: root.notifications;
                             minimum: 0; maximum: 100; value: root.threshold;
@@ -527,7 +534,7 @@ export component Settings inherits Window {
                         }
                     }
                     HorizontalLayout {
-                        Text { text: "Повторять каждые, мин"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(39); color: Breeze.fg; vertical-alignment: center; }
                         SpinBox {
                             enabled: root.notifications;
                             minimum: 1; maximum: 10080; value: root.repeat-minutes;
@@ -535,48 +542,48 @@ export component Settings inherits Window {
                         }
                     }
                     Text {
-                        text: "Порог и интервал общие для всех устройств.\nДля текстового низкого уровня процентный порог не применяется. Во время зарядки уведомлений нет.";
+                        text: Translations.tr(40);
                         color: Breeze.inactive; wrap: word-wrap;
                     }
                 }
             }
             Tab {
-                title: "Панели";
+                title: Translations.tr(41);
                 VerticalLayout {
                     padding: 12px;
                     spacing: 14px;
                     alignment: start;
                     HorizontalLayout {
-                        Text { text: "Ширина панелей, px"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(42); color: Breeze.fg; vertical-alignment: center; }
                         SpinBox {
                             minimum: 280; maximum: 800; value: root.panel-width;
                             edited(value) => { root.panel-width-selected(value); }
                         }
                     }
-                    Text { text: "Панель устройств и история уведомлений используют одну ширину."; color: Breeze.inactive; wrap: word-wrap; }
+                    Text { text: Translations.tr(43); color: Breeze.inactive; wrap: word-wrap; }
                     CheckBox {
-                        text: "Показывать панель уведомлений";
+                        text: Translations.tr(44);
                         checked: root.history-enabled;
                         toggled => { root.history-enabled-selected(self.checked); }
                     }
                     HorizontalLayout {
-                        Text { text: "Последних уведомлений"; color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: Translations.tr(45); color: Breeze.fg; vertical-alignment: center; }
                         SpinBox {
                             enabled: root.history-enabled;
                             minimum: 1; maximum: 20; value: root.history-count;
                             edited(value) => { root.history-count-selected(value); }
                         }
                     }
-                    Text { text: "История хранит последние 20 уведомлений о низком заряде. Треугольник в панели устройств раскрывает и скрывает историю. Системные уведомления настраиваются отдельно во вкладке «Общие»."; color: Breeze.inactive; wrap: word-wrap; }
+                    Text { text: Translations.tr(46); color: Breeze.inactive; wrap: word-wrap; }
                 }
             }
             Tab {
-                title: "Устройства";
+                title: Translations.tr(1);
                 VerticalLayout {
                     padding: 8px;
                     spacing: 10px;
-                    Button { text: "Add"; clicked => { root.add(); } }
-                    if root.rows.length == 0: Text { text: "Добавьте устройства для показа в трее."; color: Breeze.inactive; wrap: word-wrap; }
+                    Button { text: Translations.tr(6); clicked => { root.add(); } }
+                    if root.rows.length == 0: Text { text: Translations.tr(47); color: Breeze.inactive; wrap: word-wrap; }
                     ScrollView {
                         content-width: self.visible-width;
                         VerticalLayout {
@@ -587,18 +594,18 @@ export component Settings inherits Window {
                                 height: 58px;
                                 ToolButton {
                                     height: 58px;
-                                    label: "Изменить " + device.name;
+                                    label: Translations.tr(48) + " " + device.name;
                                     clicked => { root.edit-device(i); }
                                     BreezeIcon { source: @image-url("icons/edit.svg"); ink: Breeze.fg; }
                                 }
-                                Button { text: "Удалить"; clicked => { root.remove-device(i); } }
+                                Button { text: Translations.tr(49); clicked => { root.remove-device(i); } }
                             }
                         }
                     }
                 }
             }
             Tab {
-                title: "Диагностика";
+                title: Translations.tr(50);
                 diagnostics-scroll := ScrollView {
                     content-width: self.visible-width;
                     Text {
@@ -615,7 +622,7 @@ export component Settings inherits Window {
         if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
         HorizontalLayout {
             alignment: end;
-            Button { text: "Закрыть"; clicked => { root.dismiss(); } }
+            Button { text: Translations.tr(15); clicked => { root.dismiss(); } }
         }
     }
 }

@@ -12,6 +12,7 @@ pub enum Command {
     Edit(usize),
     Remove(usize),
     SaveEdit(String, usize),
+    Language(usize),
     Theme(i32),
     Orientation(u8),
     Colored(bool),
@@ -29,6 +30,7 @@ pub struct Tray {
     pub sender: UnboundedSender<Command>,
     pub icons: Vec<ksni::Icon>,
     pub summary: String,
+    pub labels: [String; 3],
 }
 
 impl ksni::Tray for Tray {
@@ -53,14 +55,14 @@ impl ksni::Tray for Tray {
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         [
-            ("Обновить", Command::Refresh),
-            ("Настройки", Command::Settings),
-            ("Выйти", Command::Quit),
+            (self.labels[0].clone(), Command::Refresh),
+            (self.labels[1].clone(), Command::Settings),
+            (self.labels[2].clone(), Command::Quit),
         ]
         .into_iter()
         .map(|(label, command)| {
             ksni::menu::StandardItem {
-                label: label.into(),
+                label,
                 activate: Box::new(move |this: &mut Self| {
                     let _ = this.sender.send(command.clone());
                 }),

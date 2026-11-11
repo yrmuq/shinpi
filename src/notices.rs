@@ -44,28 +44,48 @@ pub fn step(notes: &mut Vec<Note>) -> bool {
     changed || count != notes.len()
 }
 
-pub fn ago(at: u64, now: u64) -> String {
+pub fn ago(at: u64, now: u64, catalog: &crate::i18n::Catalog) -> String {
     let secs = now.saturating_sub(at);
     if secs < 60 {
-        return "Только что".into();
+        return catalog.tr("Just now");
     }
     let (n, forms) = if secs < 3600 {
-        (secs / 60, ["минуту", "минуты", "минут"])
+        (
+            secs / 60,
+            [
+                "{} minute ago",
+                "{} minutes ago [few]",
+                "{} minutes ago [many]",
+            ],
+        )
     } else if secs < 86400 {
-        (secs / 3600, ["час", "часа", "часов"])
+        (
+            secs / 3600,
+            ["{} hour ago", "{} hours ago [few]", "{} hours ago [many]"],
+        )
     } else {
-        (secs / 86400, ["день", "дня", "дней"])
+        (
+            secs / 86400,
+            ["{} day ago", "{} days ago [few]", "{} days ago [many]"],
+        )
     };
-    let form = if (11..=14).contains(&(n % 100)) {
-        2
-    } else {
-        match n % 10 {
-            1 => 0,
-            2..=4 => 1,
-            _ => 2,
+    // shortcut: English/Russian plural rules; extend when bundling another language.
+    let form = if catalog.language == "Russian" {
+        if (11..=14).contains(&(n % 100)) {
+            2
+        } else {
+            match n % 10 {
+                1 => 0,
+                2..=4 => 1,
+                _ => 2,
+            }
         }
+    } else if n == 1 {
+        0
+    } else {
+        2
     };
-    format!("{n} {} назад", forms[form])
+    catalog.trf(forms[form], &[&n.to_string()])
 }
 
 #[cfg(test)]
@@ -90,8 +110,17 @@ mod tests {
         assert_eq!(restored.len(), LIMIT - 1);
         assert_eq!(restored[0].at, 3);
         assert_eq!(restored[1].at, 5);
-        assert_eq!(ago(100, 99), "Только что");
-        assert_eq!(ago(100, 100 + 21 * 60), "21 минуту назад");
-        assert_eq!(ago(100, 100 + 12 * 3600), "12 часов назад");
+        assert_eq!(
+            ago(100, 99, &crate::i18n::Catalog::load("Russian")),
+            "Только что"
+        );
+        assert_eq!(
+            ago(100, 100 + 21 * 60, &crate::i18n::Catalog::load("Russian")),
+            "21 минуту назад"
+        );
+        assert_eq!(
+            ago(100, 100 + 12 * 3600, &crate::i18n::Catalog::load("Russian")),
+            "12 часов назад"
+        );
     }
 }

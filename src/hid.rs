@@ -38,7 +38,7 @@ fn protocol(info: &DeviceInfo) -> Option<Protocol> {
 fn send(device: &HidDevice, bytes: &[u8]) -> Result<(), String> {
     match device.write(bytes) {
         Ok(n) if n == bytes.len() => Ok(()),
-        Ok(_) => Err("Неполная отправка запроса".into()),
+        Ok(_) => Err("Incomplete request write".into()),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -58,7 +58,7 @@ fn receive<T>(device: &HidDevice, parse: impl Fn(&[u8]) -> Option<T>) -> Result<
             return Ok(value);
         }
     }
-    Err("Нет ответа: устройство спит или недоступно".into())
+    Err("No response: device is asleep or unavailable".into())
 }
 
 fn compx_request(command: u8, payload: &[u8]) -> [u8; 17] {
@@ -95,14 +95,14 @@ fn compx(device: &HidDevice, pid: u16) -> Result<Reading, String> {
             .map(|d| (d[4], d[5]))
     })?;
     if model != (7, 5) && pid != 0xf517 {
-        return Err("Модель ZAOPIN Z2 Max не подтверждена".into());
+        return Err("ZAOPIN Z2 Max identity was not confirmed".into());
     }
     std::thread::sleep(Duration::from_millis(10));
     send(device, &compx_request(3, &[]))?;
     if !receive(device, |p| {
         compx_data(p, 3).and_then(|d| d.first()).map(|v| *v != 0)
     })? {
-        return Err("Устройство отключено или спит".into());
+        return Err("Device is disconnected or asleep".into());
     }
     std::thread::sleep(Duration::from_millis(10));
     send(device, &compx_request(4, &[]))?;
@@ -134,7 +134,7 @@ fn v9_reading(p: &[u8]) -> Option<Result<Reading, String>> {
             charging: true,
             ..Default::default()
         })),
-        0x1a => Some(Err("Устройство отключено".into())),
+        0x1a => Some(Err("Device disconnected".into())),
         _ => None,
     }
 }
@@ -168,7 +168,7 @@ fn query(device: &HidDevice, protocol: Protocol, pid: u16) -> Result<Reading, St
             send(device, &[0x10, 1, 0, 0x0d, 0x10, 0, 0])?;
             let feature = receive(device, |p| hidpp_reply(p, 0))?;
             if feature == 0 {
-                return Err("HID++ Battery Status недоступен".into());
+                return Err("HID++ Battery Status unavailable".into());
             }
             send(device, &[0x10, 1, feature, 0x0d, 0, 0, 0])?;
             let percent = receive(device, |p| hidpp_reply(p, feature).filter(|p| *p <= 100))?;
@@ -202,7 +202,7 @@ pub fn scan(scan: &mut Scan) {
             Protocol::Compx => ("ZAOPIN Z2 Max", Kind::Mouse, "USB HID · Compx"),
             Protocol::Hidpp => ("Logitech G304 / G305", Kind::Mouse, "USB HID · HID++"),
             Protocol::V9 => ("MCHOSE V9 PRO", Kind::Headset, "USB HID · V9"),
-            Protocol::Xbox => ("Геймпад", Kind::Gamepad, "Bluetooth HID"),
+            Protocol::Xbox => ("Gamepad", Kind::Gamepad, "Bluetooth HID"),
         };
         let raw_path = info.path().to_string_lossy();
         let node = Path::new(raw_path.as_ref()).file_name().unwrap_or_default();
@@ -222,7 +222,7 @@ pub fn scan(scan: &mut Scan) {
                 row.status = if error.to_ascii_lowercase().contains("permission denied")
                     || error.contains("os error 13")
                 {
-                    "Нужен доступ к HID: установите правила udev и переподключите приёмник".into()
+                    "HID access required: install the udev rules and reconnect the receiver".into()
                 } else {
                     error
                 };
