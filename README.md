@@ -10,7 +10,7 @@
 ---
 
 > [!NOTE]
-> Initial implementation for KDE Plasma. Prebuilt packages are not published yet. HID support requires verification on physical hardware; this repository does not claim tested compatibility with every listed receiver.
+> Initial implementation for KDE Plasma. Development builds are attached to a draft release and are visible to repository maintainers. HID support requires verification on physical hardware; this repository does not claim tested compatibility with every listed receiver.
 
 ---
 
@@ -46,12 +46,12 @@
 
 | Format | `x86_64` | `arm64` |
 | --- | :---: | :---: |
-| `AppImage` | ❌ | ❌ |
+| `AppImage` | ✅ | ❌ |
 | `Flatpak` | ❌ | ❌ |
 
 ### AppImage
 
-Planned; no downloadable `AppImage` is currently provided. Once published, it can be integrated with `Gear Lever` ([Flathub](https://flathub.org/apps/it.mijorus.gearlever)) or launched with:
+The `Development build` workflow builds `dev` and attaches `shinpi-x86_64.AppImage` and its `SHA-256` checksum to the `shinpi dev` draft in [Releases](https://github.com/yrmuq/shinpi/releases). It keeps the package version unchanged. Download the AppImage from that draft and integrate it with `Gear Lever` ([Flathub](https://flathub.org/apps/it.mijorus.gearlever)) or launch it with:
 
 ```sh
 chmod +x shinpi-x86_64.AppImage

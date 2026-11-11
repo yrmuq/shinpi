@@ -1,0 +1,9 @@
+shinpi development AppImage
+Copyright (C) 2026 yrmuq
+SPDX-License-Identifier: GPL-3.0-or-later
+
+shinpi uses Slint/FemtoVG for windows and ksni for the tray.
+See LICENSE, NOTICE, README.md and COPYING for source component licenses.
+The Rust libraries are linked into the binary. The shared libraries bundled
+beside it are listed in LIBS.txt; their Debian copyright files are included
+in system-licenses/. glibc, display transports and GPU drivers stay on the host.

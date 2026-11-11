@@ -3,7 +3,8 @@ Copyright (C) 2026 yrmuq
 
 This program is free software under GPL-3.0-or-later. See LICENSE.
 
-The KDE palette, font and icon lookup, popup conventions and KWin placement
+The KDE palette, font and icon lookup, popup conventions, KWin placement
+and AppImage packaging
 are adapted from yoin, Copyright (C) 2026 yrmuq, GPL-3.0-or-later.
 
 ui/icons/configure.svg and ui/icons/window-pin.svg are KDE Breeze icons,

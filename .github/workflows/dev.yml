@@ -1,0 +1,52 @@
+name: Development build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/dev.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: development-draft
+  cancel-in-progress: false
+
+jobs:
+  appimage:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: shinpi-appimage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev file
+      - name: Check packaging
+        run: |
+          sh -n packaging/appimage/build.sh packaging/appimage/AppRun
+          python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Build AppImage
+        run: sh packaging/appimage/build.sh
+      - name: Check AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          set -eu
+          dist/shinpi-x86_64.AppImage --help
+          dist/shinpi-x86_64.AppImage --once | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data["devices"], list) and isinstance(data["warnings"], list)'
+          dist/shinpi-x86_64.AppImage --print-udev-rules | cmp - packaging/70-shinpi.rules
+      - name: Update draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 packaging/appimage/draft.py

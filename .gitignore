@@ -1,2 +1,5 @@
 /target/
 /work/
+/dist/
+/packaging/appimage/build/
+__pycache__/
