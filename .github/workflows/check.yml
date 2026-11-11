@@ -16,7 +16,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libwayland-dev libxkbcommon-dev dbus-daemon
+      - name: Libraries
+        run: |
+          # Keep Ubuntu signature verification; use a mirror with independent DNS.
+          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E \
+            -e 's@mirror\+file:/etc/apt/apt(-security)?-mirrors.txt@https://mirror.math.princeton.edu/pub/ubuntu@g' \
+            -e 's@https?://(azure.archive|archive|security).ubuntu.com/ubuntu/?@https://mirror.math.princeton.edu/pub/ubuntu/@g' {} +
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libwayland-dev libxkbcommon-dev dbus-daemon
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked

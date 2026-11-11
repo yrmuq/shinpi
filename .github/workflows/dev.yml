@@ -30,6 +30,10 @@ jobs:
           key: shinpi-appimage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Libraries
         run: |
+          # Keep Ubuntu signature verification; use a mirror with independent DNS.
+          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E \
+            -e 's@mirror\+file:/etc/apt/apt(-security)?-mirrors.txt@https://mirror.math.princeton.edu/pub/ubuntu@g' \
+            -e 's@https?://(azure.archive|archive|security).ubuntu.com/ubuntu/?@https://mirror.math.princeton.edu/pub/ubuntu/@g' {} +
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev file
       - name: Check packaging
