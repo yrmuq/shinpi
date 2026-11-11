@@ -4,53 +4,50 @@ on:
   workflow_dispatch:
   push:
     branches: [dev]
-    paths:
-      - .github/workflows/dev.yml
 
 permissions:
-  contents: write
-
-concurrency:
-  group: development-draft
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   appimage:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: development-build
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
         with:
+          cache: appimage
+      - run: sh packaging/check.sh
+      - run: sh packaging/appimage/build.sh
+      - run: sh packaging/appimage/check.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: development-appimage
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: shinpi-appimage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Libraries
-        run: |
-          # Keep Ubuntu signature verification; use a mirror with independent DNS.
-          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E \
-            -e 's@mirror\+file:/etc/apt/apt(-security)?-mirrors.txt@https://mirror.math.princeton.edu/pub/ubuntu@g' \
-            -e 's@https?://(azure.archive|archive|security).ubuntu.com/ubuntu/?@https://mirror.math.princeton.edu/pub/ubuntu/@g' {} +
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev file
-      - name: Check packaging
-        run: |
-          sh -n packaging/appimage/build.sh packaging/appimage/AppRun
-          python3 -m unittest discover -s tests -p 'test_*.py'
-      - name: Build AppImage
-        run: sh packaging/appimage/build.sh
-      - name: Check AppImage
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: |
-          set -eu
-          dist/shinpi-x86_64.AppImage --help
-          dist/shinpi-x86_64.AppImage --once | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data["devices"], list) and isinstance(data["warnings"], list)'
-          dist/shinpi-x86_64.AppImage --print-udev-rules | cmp - packaging/70-shinpi.rules
-      - name: Update draft
+            dist/shinpi-x86_64.AppImage
+            dist/shinpi-x86_64.AppImage.sha256
+          if-no-files-found: error
+          retention-days: 3
+  publish:
+    needs: appimage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: development-draft
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: development-appimage
+          path: dist
+      - name: Update draft for the current dev commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 packaging/appimage/draft.py

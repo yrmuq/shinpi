@@ -8,26 +8,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
         with:
-          components: rustfmt, clippy
-      - name: Libraries
-        run: |
-          # Keep Ubuntu signature verification; use a mirror with independent DNS.
-          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E \
-            -e 's@mirror\+file:/etc/apt/apt(-security)?-mirrors.txt@https://mirror.math.princeton.edu/pub/ubuntu@g' \
-            -e 's@https?://(azure.archive|archive|security).ubuntu.com/ubuntu/?@https://mirror.math.princeton.edu/pub/ubuntu/@g' {} +
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libwayland-dev libxkbcommon-dev dbus-daemon
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
-      - run: node --test tests/placement.mjs
-      - run: python3 -m unittest discover -s tests -p 'test_*.py'
-      - run: sh -n packaging/appimage/build.sh packaging/appimage/AppRun
-      - run: cargo run --locked -- --once
+          cache: check
+      - run: sh packaging/check.sh

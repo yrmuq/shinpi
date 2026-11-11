@@ -1,0 +1,45 @@
+name: Pins
+
+on:
+  schedule:
+    - cron: "0 9 28 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-prerelease
+  cancel-in-progress: false
+
+jobs:
+  pins:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Update appimagetool and prepare prerelease
+        id: prepare
+        run: python3 packaging/release/flow.py prepare pins
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+      - name: Check source
+        if: steps.prepare.outputs.ready == 'true'
+        run: sh packaging/check.sh
+      - name: Build and check AppImage
+        if: steps.prepare.outputs.ready == 'true'
+        run: |
+          sh packaging/appimage/build.sh
+          sh packaging/appimage/check.sh
+      - name: Publish pin prerelease
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          OLD_DEPS: ${{ steps.prepare.outputs.old_deps }}
+        run: python3 packaging/release/flow.py publish pins "$VERSION" "$OLD_DEPS"

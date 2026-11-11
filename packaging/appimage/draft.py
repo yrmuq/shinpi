@@ -23,10 +23,15 @@ def api(path, method="GET", payload=None):
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     commit = os.environ["GITHUB_SHA"]
+    ref = api(f"repos/{repo}/git/ref/heads/dev")
+    if ref["object"]["sha"] != commit:
+        print("Skipping a superseded development build")
+        return
     assets = [Path("dist/shinpi-x86_64.AppImage"), Path("dist/shinpi-x86_64.AppImage.sha256")]
     for asset in assets:
         if not asset.is_file():
             raise RuntimeError(f"Missing build asset: {asset}")
+    subprocess.run(["sha256sum", "-c", "shinpi-x86_64.AppImage.sha256"], cwd="dist", check=True)
     releases = []
     page = 1
     while True:

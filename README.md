@@ -62,7 +62,7 @@
 
 ### AppImage
 
-The `Development build` workflow builds `dev` and attaches `shinpi-x86_64.AppImage` and its `SHA-256` checksum to the `shinpi dev` draft in [Releases](https://github.com/yrmuq/shinpi/releases). It keeps the package version unchanged. Download the AppImage from that draft and integrate it with `Gear Lever` ([Flathub](https://flathub.org/apps/it.mijorus.gearlever)) or launch it with:
+Every push to `dev` runs checks and the `Development build` workflow, which attaches `shinpi-x86_64.AppImage` and its `SHA-256` checksum to the `shinpi dev` draft in [Releases](https://github.com/yrmuq/shinpi/releases). The draft keeps the package version unchanged. A merge of `dev` into `main` publishes the next `X.Y.0` release and synchronizes its version back into `dev`. Monthly dependency updates are built as prereleases on `deps` for manual testing and adoption into `dev`. Download the AppImage from that draft and integrate it with `Gear Lever` ([Flathub](https://flathub.org/apps/it.mijorus.gearlever)) or launch it with:
 
 ```sh
 chmod +x shinpi-x86_64.AppImage

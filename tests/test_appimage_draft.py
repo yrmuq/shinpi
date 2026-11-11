@@ -17,22 +17,32 @@ class DraftTests(unittest.TestCase):
     @patch.object(draft.subprocess, "run")
     @patch.object(draft, "api")
     def test_published_dev_release_is_never_modified(self, api, upload, _):
-        api.return_value = [{"tag_name": "dev", "draft": False, "id": 7}]
+        api.side_effect = [{"object": {"sha": "a" * 40}}, [{"tag_name": "dev", "draft": False, "id": 7}]]
         with self.assertRaisesRegex(RuntimeError, "refusing to change"):
             draft.main()
-        self.assertEqual(api.call_count, 1)
-        upload.assert_not_called()
+        self.assertEqual(api.call_count, 2)
+        self.assertEqual(upload.call_args.args[0][0], "sha256sum")
 
     @patch.dict("os.environ", GITHUB_REPOSITORY="owner/repo", GITHUB_SHA="a" * 40)
     @patch.object(Path, "is_file", return_value=True)
     @patch.object(draft.subprocess, "run")
     @patch.object(draft, "api")
     def test_creates_only_a_draft_for_the_built_commit(self, api, upload, _):
-        api.side_effect = [[], {"html_url": "https://github.com/owner/repo/releases/1"}]
+        api.side_effect = [{"object": {"sha": "a" * 40}}, [], {"html_url": "https://github.com/owner/repo/releases/1"}]
         draft.main()
         path, method, payload = api.call_args.args
         self.assertEqual((path, method), ("repos/owner/repo/releases", "POST"))
         self.assertTrue(payload["draft"])
         self.assertEqual(payload["target_commitish"], "a" * 40)
         self.assertEqual(payload["body"], "")
-        upload.assert_called_once()
+        self.assertEqual(upload.call_count, 2)
+        self.assertEqual(upload.call_args.args[0][:3], ["gh", "release", "upload"])
+
+    @patch.dict("os.environ", GITHUB_REPOSITORY="owner/repo", GITHUB_SHA="a" * 40)
+    @patch.object(draft.subprocess, "run")
+    @patch.object(draft, "api")
+    def test_superseded_build_never_touches_the_draft(self, api, upload):
+        api.return_value = {"object": {"sha": "b" * 40}}
+        draft.main()
+        api.assert_called_once()
+        upload.assert_not_called()

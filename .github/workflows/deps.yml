@@ -1,0 +1,56 @@
+name: Dependency prerelease
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependency-prerelease
+  cancel-in-progress: false
+
+jobs:
+  prerelease:
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Accumulate dependency updates and prepare prerelease
+        id: prepare
+        run: python3 packaging/release/flow.py prepare deps
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+      - name: Check source
+        if: steps.prepare.outputs.ready == 'true'
+        run: sh packaging/check.sh
+      - name: Build and check AppImage
+        if: steps.prepare.outputs.ready == 'true'
+        run: |
+          sh packaging/appimage/build.sh
+          sh packaging/appimage/check.sh
+      - name: Publish dependency prerelease
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          OLD_DEPS: ${{ steps.prepare.outputs.old_deps }}
+        run: python3 packaging/release/flow.py publish deps "$VERSION" "$OLD_DEPS"
+      - name: Close the stored Dependabot pull request
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
