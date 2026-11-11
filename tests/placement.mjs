@@ -61,3 +61,44 @@ test('a growing device list remains anchored to each panel edge', () => {
         assert.equal(popup.skipTaskbar, true);
     }
 });
+
+
+test('notification history follows popup width and stays above it at the top edge', () => {
+    vm.runInContext('windows.clear(); trackedNotices.clear()', context);
+    const output = { geometry: { x: 0, y: 0, width: 1200, height: 800 }, devicePixelRatio: 1 };
+    const area = { x: 0, y: 40, width: 1200, height: 760 };
+    const panel = { dock: true, resourceClass: 'plasmashell', frameGeometry: { x: 0, y: 0, width: 1200, height: 40 }, output };
+    function surface(caption, initial) {
+        let frame = initial;
+        const callbacks = [];
+        let visibility;
+        return {
+            caption, resourceClass: 'shinpi', output, hidden: false,
+            closed: { connect() {} },
+            hiddenChanged: { connect(callback) { visibility = callback; } },
+            frameGeometryChanged: { connect(callback) { callbacks.push(callback); } },
+            get frameGeometry() { return frame; },
+            set frameGeometry(next) { frame = next; callbacks.forEach(callback => callback()); },
+            visibility() { visibility?.(); },
+        };
+    }
+    const popup = surface('shinpi-devices', { x: 0, y: 0, width: 360, height: 140 });
+    const notes = surface('shinpi-notices', { x: 0, y: 0, width: 360, height: 232 });
+    Object.assign(context.workspace, {
+        windowList: () => [panel, popup, notes], cursorPos: { x: 600, y: 20 },
+        screenAt: () => output, clientArea: () => area,
+    });
+    context.KWin = { MaximizeArea: 0 };
+    context.track(popup);
+    context.trackNotice(notes);
+    assert.equal(notes.skipTaskbar, true);
+    assert.ok(notes.frameGeometry.y >= area.y);
+    assert.equal(notes.frameGeometry.y + notes.frameGeometry.height, popup.frameGeometry.y);
+    popup.frameGeometry = { ...popup.frameGeometry, width: 520 };
+    assert.equal(notes.frameGeometry.x, popup.frameGeometry.x);
+    assert.equal(notes.frameGeometry.width, 520);
+    notes.hidden = true;
+    notes.visibility();
+    assert.equal(popup.frameGeometry.y, 48);
+    assert.equal(context.isNotice({ caption: 'shinpi-notices', resourceClass: 'other' }), false);
+});

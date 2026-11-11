@@ -2,6 +2,7 @@ mod config;
 mod device;
 mod hid;
 mod icons;
+mod notices;
 mod notify;
 mod place;
 mod system;
@@ -30,6 +31,8 @@ struct State {
     opened: Instant,
     blur: Option<Instant>,
     seen_focus: bool,
+    popup_focused: bool,
+    notices_focused: bool,
     closing: bool,
     busy: bool,
     editing: Option<String>,
@@ -40,7 +43,7 @@ struct State {
 enum Event {
     Started,
     Scanned(device::Scan),
-    Notified(String, u64, Result<(), String>),
+    Notified(String, u64, String, Result<(), String>),
 }
 
 async fn scan() -> device::Scan {
@@ -86,19 +89,21 @@ fn color(rgb: theme::Rgb) -> slint::Color {
 struct Shell {
     popup: Option<Popup>,
     settings: Option<Settings>,
+    notices: Option<Notices>,
 }
 
-thread_local! { static CREATING_POPUP: Cell<bool> = const { Cell::new(false) }; }
+thread_local! { static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") }; }
 
 fn window_attributes(
     attributes: winit::window::WindowAttributes,
-    popup: bool,
+    panel: &str,
 ) -> winit::window::WindowAttributes {
     use winit::platform::x11::{WindowAttributesExtX11, WindowType};
+    let popup = !panel.is_empty();
     let attributes = attributes
         .with_resizable(false)
         .with_transparent(popup)
-        .with_title(if popup { "shinpi-devices" } else { "shinpi" });
+        .with_title(if popup { panel } else { "shinpi" });
     if popup {
         attributes.with_x11_window_type(vec![WindowType::PopupMenu])
     } else {
@@ -114,12 +119,12 @@ fn ensure_popup(
     if let Some(popup) = &shell.popup {
         return Some(popup.clone_strong());
     }
-    CREATING_POPUP.set(true);
+    CREATING_PANEL.set("shinpi-devices");
     let result = Popup::new();
     if let Ok(popup) = &result {
         let _ = popup.window();
     }
-    CREATING_POPUP.set(false);
+    CREATING_PANEL.set("");
     let popup = result.map_err(|e| eprintln!("shinpi: popup: {e}")).ok()?;
     let tx = sender.clone();
     popup.on_refresh(move || {
@@ -136,21 +141,43 @@ fn ensure_popup(
         }
     });
     let tx = sender.clone();
+    popup.on_history_toggled(move || {
+        let _ = tx.send(Command::ToggleHistory);
+    });
+    let tx = sender.clone();
     popup.on_add(move || {
         let _ = tx.send(Command::Add);
     });
+    bind_panel_events(popup.window(), &popup, state, sender, false);
+
+    shell.popup = Some(popup.clone_strong());
+    Some(popup)
+}
+
+fn bind_panel_events(
+    window: &slint::Window,
+    popup: &Popup,
+    state: &Rc<RefCell<State>>,
+    sender: &tokio::sync::mpsc::UnboundedSender<Command>,
+    notices: bool,
+) {
     let weak = popup.as_weak();
     let data = state.clone();
     let tx = sender.clone();
-    popup.window().on_close_requested(move || {
+    window.on_close_requested(move || {
         let _ = tx.send(Command::Dismiss);
         slint::CloseRequestResponse::KeepWindowShown
     });
     let tx = sender.clone();
-    popup.window().on_winit_window_event(move |_, event| {
+    window.on_winit_window_event(move |_, event| {
         match event {
             winit::event::WindowEvent::Focused(focused) => {
                 let mut state = data.borrow_mut();
+                if notices {
+                    state.notices_focused = *focused;
+                } else {
+                    state.popup_focused = *focused;
+                }
                 if *focused {
                     state.seen_focus = true;
                     state.blur = None;
@@ -173,9 +200,117 @@ fn ensure_popup(
         }
         EventResult::Propagate
     });
+}
 
-    shell.popup = Some(popup.clone_strong());
-    Some(popup)
+fn ensure_notices(
+    shell: &mut Shell,
+    state: &Rc<RefCell<State>>,
+    sender: &tokio::sync::mpsc::UnboundedSender<Command>,
+) -> Option<Notices> {
+    if let Some(notices) = &shell.notices {
+        return Some(notices.clone_strong());
+    }
+    let popup = shell.popup.as_ref()?;
+    CREATING_PANEL.set("shinpi-notices");
+    let result = Notices::new();
+    if let Ok(notices) = &result {
+        let _ = notices.window();
+    }
+    CREATING_PANEL.set("");
+    let notices = result.map_err(|e| eprintln!("shinpi: notices: {e}")).ok()?;
+    bind_panel_events(notices.window(), popup, state, sender, true);
+    let tx = sender.clone();
+    notices.on_dismiss_note(move |index| {
+        let _ = tx.send(Command::DismissNotice(index as usize));
+    });
+    shell.notices = Some(notices.clone_strong());
+    Some(notices)
+}
+
+fn sync_notices(
+    shell: &mut Shell,
+    state: &Rc<RefCell<State>>,
+    sender: &tokio::sync::mpsc::UnboundedSender<Command>,
+) {
+    let show = {
+        let state = state.borrow();
+        shell
+            .popup
+            .as_ref()
+            .is_some_and(|p| p.window().is_visible())
+            && !state.closing
+            && state.config.history_enabled
+            && !state.config.history_hidden
+            && !state.config.history.is_empty()
+    };
+    if !show {
+        if let Some(notices) = &shell.notices {
+            if notices.get_expanded() {
+                notices.set_expanded(false);
+                let weak = notices.as_weak();
+                slint::Timer::single_shot(Duration::from_millis(180), move || {
+                    if let Some(notices) = weak.upgrade() {
+                        if !notices.get_expanded() {
+                            let _ = notices.hide();
+                        }
+                    }
+                });
+            }
+        }
+        return;
+    }
+    let fresh = shell.notices.is_none();
+    let Some(notices) = ensure_notices(shell, state, sender) else {
+        return;
+    };
+    if fresh {
+        paint(shell, &state.borrow().config);
+        fill(shell, &state.borrow());
+    }
+    if !notices.window().is_visible() {
+        notices.set_expanded(false);
+        let _ = notices.get_slide();
+        let _ = notices.show();
+        if let Some(popup) = &shell.popup {
+            let _ = popup.window().with_winit_window(|w| w.focus_window());
+        }
+    }
+    if !notices.get_expanded() {
+        notices.set_expanded(true);
+    }
+    // KWin places Wayland surfaces; other compositors permit positioning on X11.
+    if let Some(popup) = &shell.popup {
+        let position = popup
+            .window()
+            .with_winit_window(|w| {
+                Some((
+                    w.outer_position().ok(),
+                    w.inner_size().height,
+                    w.current_monitor()?,
+                ))
+            })
+            .flatten();
+        if let Some((position, popup_height, monitor)) = position {
+            let top = monitor.position().y;
+            let scale = notices.window().scale_factor().max(1.0);
+            let available =
+                (monitor.size().height.saturating_sub(popup_height + 16) as f32 / scale).min(360.0);
+            notices.set_available_height(available.max(72.0));
+            if let Some(mut position) = position {
+                let height = notices.window().size().height as i32;
+                if position.y - height < top {
+                    position.y = top + height;
+                    popup
+                        .window()
+                        .set_position(slint::PhysicalPosition::new(position.x, position.y));
+                }
+                let target = slint::PhysicalPosition::new(position.x, position.y - height);
+                if notices.window().position() != target {
+                    notices.window().set_position(target);
+                }
+            }
+        }
+    }
 }
 
 fn ensure_settings(
@@ -237,6 +372,19 @@ fn ensure_settings(
         let _ = tx.send(Command::Repeat(value as u32));
     });
 
+    let tx = sender.clone();
+    settings.on_panel_width_selected(move |value| {
+        let _ = tx.send(Command::PanelWidth(value as u32));
+    });
+    let tx = sender.clone();
+    settings.on_history_enabled_selected(move |value| {
+        let _ = tx.send(Command::HistoryEnabled(value));
+    });
+    let tx = sender.clone();
+    settings.on_history_count_selected(move |value| {
+        let _ = tx.send(Command::HistoryCount(value as u32));
+    });
+
     let weak = settings.as_weak();
     settings.on_dismiss(move || {
         if let Some(settings) = weak.upgrade() {
@@ -281,6 +429,9 @@ fn paint(shell: &Shell, cfg: &config::Config) {
     }
     if let Some(popup) = &shell.popup {
         window_style!(popup);
+        popup.set_panel_width(cfg.panel_width as i32);
+        popup.set_history_enabled(cfg.history_enabled);
+        popup.set_history_hidden(cfg.history_hidden);
         if let Some(icon) = icons::theme_icon("configure") {
             popup.set_icon_configure(icon.image);
             popup.set_tint_configure(icon.tint);
@@ -294,8 +445,15 @@ fn paint(shell: &Shell, cfg: &config::Config) {
             popup.set_tint_refresh(icon.tint);
         }
     }
+    if let Some(notices) = &shell.notices {
+        window_style!(notices);
+        notices.set_panel_width(cfg.panel_width as i32);
+    }
     if let Some(settings) = &shell.settings {
         window_style!(settings);
+        settings.set_panel_width(cfg.panel_width as i32);
+        settings.set_history_enabled(cfg.history_enabled);
+        settings.set_history_count(cfg.history_count as i32);
         settings.set_theme_index(match cfg.theme.as_str() {
             "light" => 1,
             "dark" => 2,
@@ -360,6 +518,32 @@ fn fill(shell: &Shell, state: &State) {
     if let Some(popup) = &shell.popup {
         popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
         popup.set_busy(state.busy);
+    }
+    if let Some(notices) = &shell.notices {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let first = state
+            .config
+            .history
+            .len()
+            .saturating_sub(state.config.history_count as usize);
+        notices.set_notes(ModelRc::new(VecModel::from(
+            state
+                .config
+                .history
+                .iter()
+                .enumerate()
+                .skip(first)
+                .map(|(index, note)| NoticeRow {
+                    index: index as i32,
+                    message: note.message.clone().into(),
+                    when: notices::ago(note.at, now).into(),
+                    fade: note.fade,
+                })
+                .collect::<Vec<_>>(),
+        )));
     }
     let Some(settings) = &shell.settings else {
         return;
@@ -483,7 +667,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
-        .with_winit_window_attributes_hook(|a| window_attributes(a, CREATING_POPUP.get()))
+        .with_winit_window_attributes_hook(|a| window_attributes(a, CREATING_PANEL.get()))
         .select()?;
     let _ = slint::set_xdg_app_id("shinpi");
     let shell = Rc::new(RefCell::new(Shell::default()));
@@ -493,6 +677,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         opened: Instant::now(),
         blur: None,
         seen_focus: false,
+        popup_focused: false,
+        notices_focused: false,
         closing: false,
         busy: true,
         editing: None,
@@ -689,6 +875,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         data.borrow_mut().config.repeat_minutes = value.clamp(1, 10080);
                         changed = true;
                     }
+                    Command::PanelWidth(value) => {
+                        data.borrow_mut().config.panel_width = value.clamp(280, 800);
+                        changed = true;
+                    }
+                    Command::HistoryEnabled(value) => {
+                        data.borrow_mut().config.history_enabled = value;
+                        changed = true;
+                    }
+                    Command::HistoryCount(value) => {
+                        data.borrow_mut().config.history_count = value.clamp(1, 20);
+                        changed = true;
+                    }
+                    Command::ToggleHistory => {
+                        let mut state = data.borrow_mut();
+                        state.config.history_hidden = !state.config.history_hidden;
+                        changed = true;
+                    }
+                    Command::DismissNotice(index) => {
+                        if let Some(note) = data.borrow_mut().config.history.get_mut(index) {
+                            note.closing = true;
+                            redraw = true;
+                        }
+                    }
                     Command::Quit => {
                         let _ = slint::quit_event_loop();
                     }
@@ -713,13 +922,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 rt_handle.spawn(async move {
                                     let result =
                                         notify::send(&message).await.map_err(|e| e.to_string());
-                                    let _ = tx.send(Event::Notified(id, now, result));
+                                    let _ = tx.send(Event::Notified(id, now, message, result));
                                 });
                             }
                         }
                         state.scan = result;
                     }
-                    Event::Notified(id, at, result) => {
+                    Event::Notified(id, at, message, result) => {
                         state.pending_notifications.remove(&id);
                         match result {
                             Ok(()) => {
@@ -727,8 +936,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     state.config.devices.iter_mut().find(|d| d.id == id)
                                 {
                                     device.last_notified = at;
-                                    changed = true;
                                 }
+                                let animate = windows
+                                    .notices
+                                    .as_ref()
+                                    .is_some_and(|n| n.window().is_visible());
+                                notices::push(&mut state.config.history, message, at, animate);
+                                changed = true;
                                 state.notification_error.clear();
                             }
                             Err(error) => {
@@ -738,6 +952,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+            }
+            {
+                let mut state = data.borrow_mut();
+                let count = state.config.history.len();
+                redraw |= notices::step(&mut state.config.history);
+                changed |= count != state.config.history.len();
             }
             if changed {
                 let error = config::save(&data.borrow().config)
@@ -792,6 +1012,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let should_close = {
                     let state = data.borrow();
                     popup.window().is_visible()
+                        && !state.popup_focused
+                        && !state.notices_focused
                         && !popup.get_pinned()
                         && !state.closing
                         && state.opened.elapsed() >= Duration::from_millis(350)
@@ -803,6 +1025,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     animate(popup, &data, &slide, false);
                 }
             }
+            sync_notices(&mut windows, &data, &tx);
         },
     );
     if args.iter().any(|a| a == "--window") {
@@ -824,10 +1047,14 @@ mod window_tests {
     use super::*;
     #[test]
     fn native_identity_is_set_before_mapping_and_windows_cannot_resize() {
-        let popup = window_attributes(winit::window::WindowAttributes::default(), true);
-        let settings = window_attributes(winit::window::WindowAttributes::default(), false);
+        let popup = window_attributes(winit::window::WindowAttributes::default(), "shinpi-devices");
+        let settings = window_attributes(winit::window::WindowAttributes::default(), "");
         assert_eq!(popup.title, "shinpi-devices");
         assert_eq!(settings.title, "shinpi");
+        let notices =
+            window_attributes(winit::window::WindowAttributes::default(), "shinpi-notices");
+        assert_eq!(notices.title, "shinpi-notices");
+        assert!(notices.transparent && !notices.resizable);
         assert!(!popup.resizable && !settings.resizable);
         assert!(popup.transparent && !settings.transparent);
     }

@@ -12,6 +12,13 @@ export struct DeviceRow {
     added: bool,
 }
 
+export struct NoticeRow {
+    index: int,
+    message: string,
+    when: string,
+    fade: float,
+}
+
 // Colors are filled from the active KDE scheme. Defaults are current Breeze Light.
 export global Breeze {
     in-out property <bool> dark: false;
@@ -135,7 +142,11 @@ export component Popup inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    width: 360px;
+    in-out property <int> panel-width: 360;
+    in-out property <bool> history-enabled: true;
+    in-out property <bool> history-hidden: false;
+    callback history-toggled();
+    width: panel-width * 1px;
     height: 16px + 36px + Math.min(420px, Math.max(88px, rows.length * 46px));
     out property <length> layout-height: root.height;
     in-out property <[DeviceRow]> rows;
@@ -178,12 +189,23 @@ export component Popup inherits Window {
                 background: transparent;
                 Text {
                     x: 8px;
-                    width: parent.width - 116px;
+                    width: parent.width - (root.history-enabled ? 152px : 116px);
                     height: parent.height;
                     text: "Устройства";
                     color: Breeze.fg;
                     vertical-alignment: center;
                     font-weight: 600;
+                }
+                if root.history-enabled: ToolButton {
+                    x: parent.width - 140px;
+                    label: root.history-hidden ? "Показать уведомления" : "Скрыть уведомления";
+                    clicked => { root.history-toggled(); }
+                    Path {
+                        width: 12px; height: 12px;
+                        viewbox-width: 12; viewbox-height: 12;
+                        fill: Breeze.fg;
+                        commands: root.history-hidden ? "M 1 9 L 6 3 L 11 9 Z" : "M 1 3 L 6 9 L 11 3 Z";
+                    }
                 }
                 ToolButton {
                     x: parent.width - 104px;
@@ -218,6 +240,77 @@ export component Popup inherits Window {
                     spacing: 6px;
                     for row in root.rows: DeviceLine { entry: row; }
 
+                }
+            }
+        }
+    }
+}
+
+export component Notices inherits Window {
+    title: "shinpi-notices";
+    icon: @image-url("../assets/icon.svg");
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    in-out property <bool> dark;
+    in-out property <string> ui-font-family: "Noto Sans";
+    in-out property <length> ui-font-size: 13.333px;
+    in-out property <int> ui-font-weight: 400;
+    default-font-family: ui-font-family;
+    default-font-size: ui-font-size;
+    default-font-weight: ui-font-weight;
+    changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    in-out property <[NoticeRow]> notes;
+    in-out property <int> panel-width: 360;
+    in-out property <length> available-height: 360px;
+    in-out property <bool> expanded: false;
+    out property <length> slide: expanded ? 0px : root.height;
+    animate slide { duration: 180ms; easing: ease-out; }
+    width: panel-width * 1px;
+    height: Math.min(available-height, 16px + notes.length * 72px);
+    callback dismiss-note(int);
+    Rectangle {
+        y: root.slide;
+        width: parent.width;
+        height: parent.height;
+        clip: true;
+        opacity: 1 - root.slide / Math.max(root.height, 1px);
+        ScrollView {
+            content-width: self.visible-width;
+            VerticalLayout {
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 1px;
+                for note in root.notes: Rectangle {
+                    height: 71px;
+                    clip: true;
+                    Rectangle {
+                        y: (1 - note.fade) * 71px;
+                        width: parent.width;
+                        height: parent.height;
+                        opacity: note.fade;
+                        animate opacity, y { duration: 60ms; }
+                        background: Breeze.window;
+                        border-radius: Breeze.radius;
+                        border-width: 1px;
+                        border-color: Breeze.frame;
+                        VerticalLayout {
+                            x: 8px;
+                            width: parent.width - 40px;
+                            height: parent.height;
+                            alignment: center;
+                            spacing: 0px;
+                            Text { text: "Низкий заряд устройства"; color: Breeze.fg; font-weight: 600; overflow: elide; min-width: 0px; height: 18px; }
+                            Text { text: note.message; color: Breeze.fg; overflow: elide; min-width: 0px; height: 18px; }
+                            Text { text: note.when; color: Breeze.inactive; overflow: elide; min-width: 0px; font-size: root.ui-font-size * 0.85; height: 16px; }
+                        }
+                        ToolButton {
+                            x: parent.width - 32px;
+                            label: "Удалить уведомление";
+                            clicked => { root.dismiss-note(note.index); }
+                            Text { text: "×"; color: Breeze.inactive; font-size: 18px; }
+                        }
+                    }
                 }
             }
         }
@@ -323,6 +416,12 @@ export component Settings inherits Window {
     in-out property <int> theme-index;
     in-out property <int> orientation;
     in-out property <bool> colored: true;
+    in-out property <int> panel-width: 360;
+    in-out property <bool> history-enabled: true;
+    in-out property <int> history-count: 3;
+    callback panel-width-selected(int);
+    callback history-enabled-selected(bool);
+    callback history-count-selected(int);
     in-out property <bool> notifications: true;
     in-out property <int> threshold: 15;
     in-out property <int> repeat-minutes: 60;
@@ -439,6 +538,36 @@ export component Settings inherits Window {
                         text: "Порог и интервал общие для всех устройств.\nДля текстового низкого уровня процентный порог не применяется. Во время зарядки уведомлений нет.";
                         color: Breeze.inactive; wrap: word-wrap;
                     }
+                }
+            }
+            Tab {
+                title: "Панели";
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 14px;
+                    alignment: start;
+                    HorizontalLayout {
+                        Text { text: "Ширина панелей, px"; color: Breeze.fg; vertical-alignment: center; }
+                        SpinBox {
+                            minimum: 280; maximum: 800; value: root.panel-width;
+                            edited(value) => { root.panel-width-selected(value); }
+                        }
+                    }
+                    Text { text: "Панель устройств и история уведомлений используют одну ширину."; color: Breeze.inactive; wrap: word-wrap; }
+                    CheckBox {
+                        text: "Показывать панель уведомлений";
+                        checked: root.history-enabled;
+                        toggled => { root.history-enabled-selected(self.checked); }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Последних уведомлений"; color: Breeze.fg; vertical-alignment: center; }
+                        SpinBox {
+                            enabled: root.history-enabled;
+                            minimum: 1; maximum: 20; value: root.history-count;
+                            edited(value) => { root.history-count-selected(value); }
+                        }
+                    }
+                    Text { text: "История хранит последние 20 уведомлений о низком заряде. Треугольник в панели устройств раскрывает и скрывает историю. Системные уведомления настраиваются отдельно во вкладке «Общие»."; color: Breeze.inactive; wrap: word-wrap; }
                 }
             }
             Tab {

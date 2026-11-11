@@ -11,6 +11,27 @@ function isPopup(window) {
     return textOf(window.caption) === "shinpi-devices" && String(window.resourceClass) === "shinpi" && !window.dialog;
 }
 
+function isNotice(window) {
+    return textOf(window.caption) === "shinpi-notices" && String(window.resourceClass) === "shinpi" && !window.dialog;
+}
+
+function visibleNotices() {
+    return workspace.windowList().filter((window) => isNotice(window) && !window.deleted && !window.hidden);
+}
+
+function repositionNotices() {
+    const popup = workspace.windowList().find((window) => isPopup(window) && !window.deleted && !window.hidden);
+    if (!popup) { return; }
+    const pf = popup.frameGeometry;
+    for (const notice of visibleNotices()) {
+        const nf = notice.frameGeometry;
+        const target = { x: pf.x, y: pf.y - nf.height, width: pf.width, height: nf.height };
+        if (nf.x !== target.x || nf.y !== target.y || nf.width !== target.width) {
+            notice.frameGeometry = target;
+        }
+    }
+}
+
 function hideFromTaskbar(window) {
     window.skipTaskbar = true;
     window.skipSwitcher = true;
@@ -133,8 +154,10 @@ function place(entry) {
     const ratio = ratioOf(window);
     const target = placement(frame, area, entry.anchor);
     target.x = snap(target.x, ratio);
-    target.y = snap(target.y, ratio);
+    const noticeHeight = Math.max(0, ...visibleNotices().map((notice) => notice.frameGeometry.height));
+    target.y = snap(Math.max(target.y, area.y + GAP + noticeHeight), ratio);
     if (frame.x === target.x && frame.y === target.y) {
+        repositionNotices();
         return;
     }
     entry.moving = true;
@@ -143,6 +166,7 @@ function place(entry) {
     } finally {
         entry.moving = false;
     }
+    repositionNotices();
 }
 
 function track(window) {
@@ -170,9 +194,27 @@ function track(window) {
     onShow();
 }
 
+const trackedNotices = new Set();
+function trackNotice(window) {
+    if (!isNotice(window) || trackedNotices.has(window)) { return; }
+    trackedNotices.add(window);
+    hideFromTaskbar(window);
+    window.keepAbove = true;
+    const update = () => {
+        for (const entry of windows.values()) { place(entry); }
+        repositionNotices();
+    };
+    window.frameGeometryChanged.connect(update);
+    const visibilityChanged = window.windowShown || window.hiddenChanged;
+    if (visibilityChanged) { visibilityChanged.connect(update); }
+    window.closed.connect(() => trackedNotices.delete(window));
+    update();
+}
+
 function arm(window) {
     track(window);
-    if (window.captionChanged) { window.captionChanged.connect(() => track(window)); }
+    trackNotice(window);
+    if (window.captionChanged) { window.captionChanged.connect(() => { track(window); trackNotice(window); }); }
 }
 workspace.windowAdded.connect(arm);
 workspace.windowList().forEach(arm);

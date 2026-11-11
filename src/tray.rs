@@ -18,6 +18,11 @@ pub enum Command {
     Notifications(bool),
     Threshold(u8),
     Repeat(u32),
+    PanelWidth(u32),
+    HistoryEnabled(bool),
+    HistoryCount(u32),
+    ToggleHistory,
+    DismissNotice(usize),
 }
 
 pub struct Tray {

@@ -11,6 +11,11 @@ pub struct Config {
     pub notifications: bool,
     pub low_threshold: u8,
     pub repeat_minutes: u32,
+    pub panel_width: u32,
+    pub history_enabled: bool,
+    pub history_hidden: bool,
+    pub history_count: u32,
+    pub history: Vec<crate::notices::Note>,
     pub devices: Vec<Selected>,
 }
 
@@ -23,6 +28,11 @@ impl Default for Config {
             notifications: true,
             low_threshold: 15,
             repeat_minutes: 60,
+            panel_width: 360,
+            history_enabled: true,
+            history_hidden: false,
+            history_count: 3,
+            history: Vec::new(),
             devices: Vec::new(),
         }
     }
@@ -106,6 +116,10 @@ pub fn load() -> Config {
         },
         Err(_) => Config::default(),
     };
+    config.panel_width = config.panel_width.clamp(280, 800);
+    config.history_count = config.history_count.clamp(1, 20);
+    let excess = config.history.len().saturating_sub(crate::notices::LIMIT);
+    config.history.drain(..excess);
     config.tray_orientation = config.tray_orientation.min(3);
     config.low_threshold = config.low_threshold.min(100);
     config.repeat_minutes = config.repeat_minutes.clamp(1, 10080);
@@ -137,6 +151,10 @@ mod tests {
         let mut config: Config = serde_json::from_str("{\"theme\":\"dark\"}").unwrap();
         assert!(config.devices.is_empty());
         assert!(config.colored_icon);
+        assert_eq!(config.panel_width, 360);
+        assert_eq!(config.history_count, 3);
+        assert!(config.history_enabled && !config.history_hidden);
+        assert!(config.history.is_empty());
         let mut a = Device::new("mouse".into(), "Mouse".into(), Kind::Mouse, "UPower");
         a.reading.percent = Some(12);
         let mut b = a.clone();

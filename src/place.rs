@@ -88,7 +88,7 @@ skippager=true
 skippagerrule=2
 skipswitcher=true
 skipswitcherrule=2
-title=shinpi-(devices)
+title=shinpi-(devices|notices)
 titlematch=3
 wmclass=shinpi
 wmclassmatch=1
@@ -148,7 +148,7 @@ fn rewrite_tray_rule(text: &str) -> String {
 }
 fn merge_kwin_rules(text: &str) -> Option<String> {
     if text.contains("[shinpi-tray]") {
-        if text.contains("title=shinpi-(devices)\n") && text.contains("titlematch=3\n") {
+        if text.contains("title=shinpi-(devices|notices)\n") && text.contains("titlematch=3\n") {
             return None;
         }
         return Some(rewrite_tray_rule(text));
@@ -222,17 +222,17 @@ mod tests {
         assert!(first.contains("rules=1,shinpi-tray\n"));
         assert!(first.contains("count=2\n"));
         assert!(first.contains("skiptaskbar=true\n"));
-        assert!(first.contains("title=shinpi-(devices)\n"));
+        assert!(first.contains("title=shinpi-(devices|notices)\n"));
         assert!(first.contains("titlematch=3\n"));
         assert!(merge_kwin_rules(&first).is_none());
         let stale = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nwmclass=shinpi\nskiptaskbar=true\n";
         let updated = merge_kwin_rules(stale).unwrap();
-        assert!(updated.contains("title=shinpi-(devices)\n"));
+        assert!(updated.contains("title=shinpi-(devices|notices)\n"));
         assert!(!updated.contains("Description=shinpi tray windows\n"));
         assert!(merge_kwin_rules(&updated).is_none());
         let old = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nDescription=shinpi tray popup\ntitle=shinpi-devices\ntitlematch=1\nwmclass=shinpi\n";
         let fixed = merge_kwin_rules(old).unwrap();
-        assert!(fixed.contains("title=shinpi-(devices)\n"));
+        assert!(fixed.contains("title=shinpi-(devices|notices)\n"));
         assert!(!fixed.contains("title=shinpi-devices\n"));
         assert!(merge_kwin_rules(&fixed).is_none());
         let empty = merge_kwin_rules("").unwrap();
