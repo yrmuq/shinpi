@@ -1,4 +1,4 @@
-// Adapted from yoin, Copyright (C) 2026 yrmuq, GPL-3.0-or-later.
+// Copyright (C) 2026 yrmuq, GPL-3.0-or-later.
 const GAP = 8;
 const windows = new Map();
 let lastAnchor = null;

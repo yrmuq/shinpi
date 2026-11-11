@@ -1,4 +1,4 @@
-// Adapted from yoin, Copyright (C) 2026 yrmuq.
+// Copyright (C) 2026 yrmuq.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::path::{Path, PathBuf};
 pub struct ThemeIcon {

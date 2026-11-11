@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="ui/icons/battery.svg" alt="shinpi" width="80">
+  <img src="assets/icon.svg" alt="shinpi" width="80">
   <h1>shinpi</h1>
 
   [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -17,7 +17,7 @@
 ## Features
 
 - Only added devices are shown, with a centered type icon and a customizable name on the left, battery percentage or reported level on the right. Charging and approximate readings are marked explicitly; missing data is never displayed as `0%`.
-- KDE colors, fonts, icon theme, rounded popup, slide animation and pin behavior reuse `yoin` conventions. KWin positions the popup beside the panel; other compositors choose the placement themselves.
+- KDE colors, fonts and icon theme, with a rounded popup, slide animation and pin control. KWin positions the popup beside the panel; other compositors choose the placement themselves. Only Settings has a taskbar entry; its device picker and editor are child dialogs. Settings and dialogs have fixed sizes; diagnostics wrap and scroll within the window.
 - Background refresh every 30 seconds through Linux `power_supply`, BlueZ `Battery1` and UPower. Sources are never merged or switched automatically: each discovered source is a separate choice. Added devices keep their last readings when disconnected, including across application restarts.
 - Read-only HID battery queries for ZAOPIN Z2 Max Compx receivers, Logitech G304/G305 `HID++`, MCHOSE V9 PRO and passive Bluetooth Xbox-compatible reports from supported 8BitDo/Xbox identities. CIY Tester 68 and other peripherals work when the system supplies their battery reading. Unknown receivers are never queried.
 - The tray battery shows the lowest reported band among added devices, including saved readings. Color mode is the default: `100%` full green, `51–99%` three-quarter green, `26–50%` half yellow, `0–25%` quarter red. A reported low or critical text level is red. Monochrome mode uses the same fill steps with theme contrast; unknown readings have no colored fill. Four orientations are available: horizontal, horizontal reversed, vertical and vertical reversed.
@@ -36,6 +36,7 @@
 | Gear icon | Open appearance, notifications, added devices and diagnostics. |
 | `Add` in the empty popup | Open Settings and the device picker. Hidden once a device is added; returns when all devices are removed. |
 | `Add` in Settings | Open discovered devices with their source and current charge; add the preferred variant. |
+| `+` in the device picker | Add that source. A checkmark indicates an already added source. |
 | Pencil in Settings | Edit the device name and type icon. |
 | Remove in Settings | Remove that device from the display; it can be added again later. |
 | Pin icon | Keep the popup open when focus moves elsewhere. |
@@ -89,7 +90,6 @@ The rules grant access with `uaccess`, without making the device world-writable.
 
 | Component | Upstream | License | Integration Details |
 | --- | --- | --- | --- |
-| `yoin` | [yrmuq/yoin](https://github.com/yrmuq/yoin) | `GPL-3.0-or-later` | KDE palette, fonts, icon lookup, popup conventions and KWin placement. |
 | Breeze icons | [KDE/breeze-icons](https://github.com/KDE/breeze-icons) | `LGPL-3.0-or-later` | Bundled gear and pin SVGs; see `ui/icons/COPYING`. Other device icons come from the host theme with original fallbacks. |
 | `slint` | [slint-ui/slint](https://github.com/slint-ui/slint) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Native windows rendered with `FemtoVG`. |
 | `ksni` | [iovxw/ksni](https://github.com/iovxw/ksni) | `Unlicense` | StatusNotifier tray. |

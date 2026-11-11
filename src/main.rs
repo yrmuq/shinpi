@@ -82,69 +82,233 @@ fn color(rgb: theme::Rgb) -> slint::Color {
     slint::Color::from_rgb_u8(rgb.r, rgb.g, rgb.b)
 }
 
-fn paint(
-    popup: &Popup,
-    settings: &Settings,
-    add: &AddDevices,
-    editor: &DeviceEditor,
-    cfg: &config::Config,
-) {
+#[derive(Default)]
+struct Shell {
+    popup: Option<Popup>,
+    settings: Option<Settings>,
+}
+
+thread_local! { static CREATING_POPUP: Cell<bool> = const { Cell::new(false) }; }
+
+fn window_attributes(
+    attributes: winit::window::WindowAttributes,
+    popup: bool,
+) -> winit::window::WindowAttributes {
+    use winit::platform::x11::{WindowAttributesExtX11, WindowType};
+    let attributes = attributes
+        .with_resizable(false)
+        .with_transparent(popup)
+        .with_title(if popup { "shinpi-devices" } else { "shinpi" });
+    if popup {
+        attributes.with_x11_window_type(vec![WindowType::PopupMenu])
+    } else {
+        attributes
+    }
+}
+
+fn ensure_popup(
+    shell: &mut Shell,
+    state: &Rc<RefCell<State>>,
+    sender: &tokio::sync::mpsc::UnboundedSender<Command>,
+) -> Option<Popup> {
+    if let Some(popup) = &shell.popup {
+        return Some(popup.clone_strong());
+    }
+    CREATING_POPUP.set(true);
+    let result = Popup::new();
+    if let Ok(popup) = &result {
+        let _ = popup.window();
+    }
+    CREATING_POPUP.set(false);
+    let popup = result.map_err(|e| eprintln!("shinpi: popup: {e}")).ok()?;
+    let tx = sender.clone();
+    popup.on_refresh(move || {
+        let _ = tx.send(Command::Refresh);
+    });
+    let tx = sender.clone();
+    popup.on_configure(move || {
+        let _ = tx.send(Command::Settings);
+    });
+    let weak = popup.as_weak();
+    popup.on_pin_toggled(move || {
+        if let Some(popup) = weak.upgrade() {
+            popup.set_pinned(!popup.get_pinned());
+        }
+    });
+    let tx = sender.clone();
+    popup.on_add(move || {
+        let _ = tx.send(Command::Add);
+    });
+    let weak = popup.as_weak();
+    let data = state.clone();
+    let tx = sender.clone();
+    popup.window().on_close_requested(move || {
+        let _ = tx.send(Command::Dismiss);
+        slint::CloseRequestResponse::KeepWindowShown
+    });
+    let tx = sender.clone();
+    popup.window().on_winit_window_event(move |_, event| {
+        match event {
+            winit::event::WindowEvent::Focused(focused) => {
+                let mut state = data.borrow_mut();
+                if *focused {
+                    state.seen_focus = true;
+                    state.blur = None;
+                } else if state.seen_focus {
+                    state.blur = Some(Instant::now());
+                }
+            }
+            winit::event::WindowEvent::KeyboardInput { event, .. }
+                if event.state == winit::event::ElementState::Pressed
+                    && event.logical_key
+                        == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) =>
+            {
+                if let Some(popup) = weak.upgrade() {
+                    if !popup.get_pinned() {
+                        let _ = tx.send(Command::Dismiss);
+                    }
+                }
+            }
+            _ => {}
+        }
+        EventResult::Propagate
+    });
+
+    shell.popup = Some(popup.clone_strong());
+    Some(popup)
+}
+
+fn ensure_settings(
+    shell: &mut Shell,
+    sender: &tokio::sync::mpsc::UnboundedSender<Command>,
+) -> Option<Settings> {
+    if let Some(settings) = &shell.settings {
+        return Some(settings.clone_strong());
+    }
+    let settings = Settings::new()
+        .map_err(|e| eprintln!("shinpi: settings: {e}"))
+        .ok()?;
+    let tx = sender.clone();
+    settings.on_add(move || {
+        let _ = tx.send(Command::Add);
+    });
+    let tx = sender.clone();
+    settings.on_refresh(move || {
+        let _ = tx.send(Command::Refresh);
+    });
+    let tx = sender.clone();
+    settings.on_add_device(move |index| {
+        let _ = tx.send(Command::Select(index as usize));
+    });
+    let tx = sender.clone();
+    settings.on_edit_device(move |index| {
+        let _ = tx.send(Command::Edit(index as usize));
+    });
+    let tx = sender.clone();
+    settings.on_remove_device(move |index| {
+        let _ = tx.send(Command::Remove(index as usize));
+    });
+    let tx = sender.clone();
+    settings.on_save_device(move |name, kind| {
+        let _ = tx.send(Command::SaveEdit(name.to_string(), kind as usize));
+    });
+    let tx = sender.clone();
+    settings.on_theme_selected(move |index| {
+        let _ = tx.send(Command::Theme(index));
+    });
+    let tx = sender.clone();
+    settings.on_orientation_selected(move |index| {
+        let _ = tx.send(Command::Orientation(index as u8));
+    });
+    let tx = sender.clone();
+    settings.on_colored_selected(move |value| {
+        let _ = tx.send(Command::Colored(value));
+    });
+    let tx = sender.clone();
+    settings.on_notifications_selected(move |value| {
+        let _ = tx.send(Command::Notifications(value));
+    });
+    let tx = sender.clone();
+    settings.on_threshold_selected(move |value| {
+        let _ = tx.send(Command::Threshold(value as u8));
+    });
+    let tx = sender.clone();
+    settings.on_repeat_selected(move |value| {
+        let _ = tx.send(Command::Repeat(value as u32));
+    });
+
+    let weak = settings.as_weak();
+    settings.on_dismiss(move || {
+        if let Some(settings) = weak.upgrade() {
+            settings.invoke_close_dialogs();
+            let _ = settings.hide();
+        }
+    });
+    let weak = settings.as_weak();
+    settings.window().on_close_requested(move || {
+        if let Some(settings) = weak.upgrade() {
+            settings.invoke_close_dialogs();
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+    shell.settings = Some(settings.clone_strong());
+    Some(settings)
+}
+
+fn paint(shell: &Shell, cfg: &config::Config) {
     let palette = theme::system_palette(&cfg.theme);
     let dark = theme::resolved(&cfg.theme, theme::system_dark()) == "dark";
     let font = theme::system_font();
-    let scale = popup.window().scale_factor().max(1.0);
-    let size = (font.size_px * scale).round() / scale;
     macro_rules! window_style {
         ($window:expr) => {{
-            $window.set_dark(dark);
-            $window.set_ui_font_family(font.family.clone().into());
-            $window.set_ui_font_size(size);
-            $window.set_ui_font_weight(font.weight);
+            let window = $window;
+            window.set_dark(dark);
+            window.set_ui_font_family(font.family.clone().into());
+            let scale = window.window().scale_factor().max(1.0);
+            window.set_ui_font_size((font.size_px * scale).round() / scale);
+            window.set_ui_font_weight(font.weight);
+            let breeze = window.global::<Breeze>();
+            breeze.set_window(color(palette.window));
+            breeze.set_button(color(palette.button));
+            breeze.set_button_hover(color(palette.button_hover));
+            breeze.set_fg(color(palette.text));
+            breeze.set_inactive(color(palette.inactive));
+            breeze.set_selection(color(palette.accent));
+            breeze.set_selection_fg(color(palette.accent_text));
+            breeze.set_frame(color(palette.frame));
+            breeze.set_outline(color(palette.outline));
         }};
     }
-    window_style!(popup);
-    window_style!(settings);
-    window_style!(add);
-    window_style!(editor);
-    for breeze in [
-        popup.global::<Breeze>(),
-        settings.global::<Breeze>(),
-        add.global::<Breeze>(),
-        editor.global::<Breeze>(),
-    ] {
-        breeze.set_window(color(palette.window));
-        breeze.set_button(color(palette.button));
-        breeze.set_button_hover(color(palette.button_hover));
-        breeze.set_fg(color(palette.text));
-        breeze.set_inactive(color(palette.inactive));
-        breeze.set_selection(color(palette.accent));
-        breeze.set_selection_fg(color(palette.accent_text));
-        breeze.set_frame(color(palette.frame));
-        breeze.set_outline(color(palette.outline));
+    if let Some(popup) = &shell.popup {
+        window_style!(popup);
+        if let Some(icon) = icons::theme_icon("configure") {
+            popup.set_icon_configure(icon.image);
+            popup.set_tint_configure(icon.tint);
+        }
+        if let Some(icon) = icons::theme_icon("window-pin") {
+            popup.set_icon_pin(icon.image);
+            popup.set_tint_pin(icon.tint);
+        }
+        if let Some(icon) = icons::theme_icon("view-refresh") {
+            popup.set_icon_refresh(icon.image);
+            popup.set_tint_refresh(icon.tint);
+        }
     }
-    settings.set_theme_index(match cfg.theme.as_str() {
-        "light" => 1,
-        "dark" => 2,
-        _ => 0,
-    });
-    settings.set_orientation(i32::from(cfg.tray_orientation));
-    settings.set_colored(cfg.colored_icon);
-    settings.set_notifications(cfg.notifications);
-    settings.set_threshold(i32::from(cfg.low_threshold));
-    settings.set_repeat_minutes(cfg.repeat_minutes as i32);
-    let svg = icons::tray_svg(cfg.minimum(), cfg.tray_orientation, cfg.colored_icon, dark);
-    settings.set_tray_preview(slint::Image::load_from_svg_data(svg.as_bytes()).unwrap_or_default());
-    if let Some(icon) = icons::theme_icon("configure") {
-        popup.set_icon_configure(icon.image);
-        popup.set_tint_configure(icon.tint);
-    }
-    if let Some(icon) = icons::theme_icon("window-pin") {
-        popup.set_icon_pin(icon.image);
-        popup.set_tint_pin(icon.tint);
-    }
-    if let Some(icon) = icons::theme_icon("view-refresh") {
-        popup.set_icon_refresh(icon.image);
-        popup.set_tint_refresh(icon.tint);
+    if let Some(settings) = &shell.settings {
+        window_style!(settings);
+        settings.set_theme_index(match cfg.theme.as_str() {
+            "light" => 1,
+            "dark" => 2,
+            _ => 0,
+        });
+        settings.set_orientation(i32::from(cfg.tray_orientation));
+        settings.set_colored(cfg.colored_icon);
+        settings.set_notifications(cfg.notifications);
+        settings.set_threshold(i32::from(cfg.low_threshold));
+        settings.set_repeat_minutes(cfg.repeat_minutes as i32);
+        let svg = icons::tray_svg(cfg.minimum(), cfg.tray_orientation, cfg.colored_icon, dark);
+        settings
+            .set_tray_preview(slint::Image::load_from_svg_data(svg.as_bytes()).unwrap_or_default());
     }
 }
 
@@ -183,14 +347,23 @@ fn row(
     }
 }
 
-fn fill(popup: &Popup, settings: &Settings, add: &AddDevices, state: &State) {
+fn fill(shell: &Shell, state: &State) {
+    if shell.popup.is_none() && shell.settings.is_none() {
+        return;
+    }
     let rows: Vec<_> = state
         .config
         .devices
         .iter()
         .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true))
         .collect();
-    popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+    if let Some(popup) = &shell.popup {
+        popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+        popup.set_busy(state.busy);
+    }
+    let Some(settings) = &shell.settings else {
+        return;
+    };
     settings.set_rows(ModelRc::new(VecModel::from(rows)));
     let candidates: Vec<_> = state
         .scan
@@ -206,9 +379,8 @@ fn fill(popup: &Popup, settings: &Settings, add: &AddDevices, state: &State) {
             )
         })
         .collect();
-    add.set_rows(ModelRc::new(VecModel::from(candidates)));
-    add.set_busy(state.busy);
-    popup.set_busy(state.busy);
+    settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
+    settings.set_busy(state.busy);
     let mut diagnostics = state.scan.warnings.clone();
     diagnostics.extend(
         state
@@ -311,13 +483,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
-        .with_winit_window_attributes_hook(|a| a.with_transparent(true))
+        .with_winit_window_attributes_hook(|a| window_attributes(a, CREATING_POPUP.get()))
         .select()?;
     let _ = slint::set_xdg_app_id("shinpi");
-    let popup = Popup::new()?;
-    let settings = Settings::new()?;
-    let add = AddDevices::new()?;
-    let editor = DeviceEditor::new()?;
+    let shell = Rc::new(RefCell::new(Shell::default()));
     let state = Rc::new(RefCell::new(State {
         config: config::load(),
         scan: device::Scan::default(),
@@ -330,8 +499,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         pending_notifications: HashSet::new(),
         notification_error: String::new(),
     }));
-    paint(&popup, &settings, &add, &editor, &state.borrow().config);
-    fill(&popup, &settings, &add, &state.borrow());
     let (sender, mut commands) = tokio::sync::mpsc::unbounded_channel();
     let (refresh, mut refresh_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let (results_tx, results) = std::sync::mpsc::channel();
@@ -345,7 +512,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cfg.minimum(),
                     cfg.tray_orientation,
                     cfg.colored_icon,
-                    popup.get_dark(),
+                    theme::resolved(&cfg.theme, theme::system_dark()) == "dark",
                 )
             },
             summary: "Поиск устройств…".into(),
@@ -377,126 +544,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let animation = Rc::new(slint::Timer::default());
+    let tick_shell = shell.clone();
     let tx = sender.clone();
-    popup.on_refresh(move || {
-        let _ = tx.send(Command::Refresh);
-    });
-    let tx = sender.clone();
-    popup.on_configure(move || {
-        let _ = tx.send(Command::Settings);
-    });
-    let weak = popup.as_weak();
-    popup.on_pin_toggled(move || {
-        if let Some(popup) = weak.upgrade() {
-            popup.set_pinned(!popup.get_pinned());
-        }
-    });
-    let tx = sender.clone();
-    popup.on_add(move || {
-        let _ = tx.send(Command::Add);
-    });
-    let tx = sender.clone();
-    settings.on_add(move || {
-        let _ = tx.send(Command::Add);
-    });
-    let tx = sender.clone();
-    add.on_refresh(move || {
-        let _ = tx.send(Command::Refresh);
-    });
-    let tx = sender.clone();
-    add.on_add_device(move |index| {
-        let _ = tx.send(Command::Select(index as usize));
-    });
-    let tx = sender.clone();
-    settings.on_edit_device(move |index| {
-        let _ = tx.send(Command::Edit(index as usize));
-    });
-    let tx = sender.clone();
-    settings.on_remove_device(move |index| {
-        let _ = tx.send(Command::Remove(index as usize));
-    });
-    let tx = sender.clone();
-    editor.on_save_device(move |name, kind| {
-        let _ = tx.send(Command::SaveEdit(name.to_string(), kind as usize));
-    });
-    let tx = sender.clone();
-    settings.on_theme_selected(move |index| {
-        let _ = tx.send(Command::Theme(index));
-    });
-    let tx = sender.clone();
-    settings.on_orientation_selected(move |index| {
-        let _ = tx.send(Command::Orientation(index as u8));
-    });
-    let tx = sender.clone();
-    settings.on_colored_selected(move |value| {
-        let _ = tx.send(Command::Colored(value));
-    });
-    let tx = sender.clone();
-    settings.on_notifications_selected(move |value| {
-        let _ = tx.send(Command::Notifications(value));
-    });
-    let tx = sender.clone();
-    settings.on_threshold_selected(move |value| {
-        let _ = tx.send(Command::Threshold(value as u8));
-    });
-    let tx = sender.clone();
-    settings.on_repeat_selected(move |value| {
-        let _ = tx.send(Command::Repeat(value as u32));
-    });
-    macro_rules! dismiss_window {
-        ($window:expr) => {{
-            let weak = $window.as_weak();
-            $window.on_dismiss(move || {
-                if let Some(window) = weak.upgrade() {
-                    let _ = window.hide();
-                }
-            });
-            $window
-                .window()
-                .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
-        }};
-    }
-    dismiss_window!(settings);
-    dismiss_window!(add);
-    dismiss_window!(editor);
-    let weak = popup.as_weak();
-    let data = state.clone();
-    let tx = sender.clone();
-    popup.window().on_close_requested(move || {
-        let _ = tx.send(Command::Dismiss);
-        slint::CloseRequestResponse::KeepWindowShown
-    });
-    let tx = sender.clone();
-    popup.window().on_winit_window_event(move |_, event| {
-        match event {
-            winit::event::WindowEvent::Focused(focused) => {
-                let mut state = data.borrow_mut();
-                if *focused {
-                    state.seen_focus = true;
-                    state.blur = None;
-                } else if state.seen_focus {
-                    state.blur = Some(Instant::now());
-                }
-            }
-            winit::event::WindowEvent::KeyboardInput { event, .. }
-                if event.state == winit::event::ElementState::Pressed
-                    && event.logical_key
-                        == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) =>
-            {
-                if let Some(popup) = weak.upgrade() {
-                    if !popup.get_pinned() {
-                        let _ = tx.send(Command::Dismiss);
-                    }
-                }
-            }
-            _ => {}
-        }
-        EventResult::Propagate
-    });
-    let tick_popup = popup.as_weak();
-    let tick_settings = settings.as_weak();
-    let tick_add = add.as_weak();
-    let tick_editor = editor.as_weak();
     let data = state.clone();
     let slide = animation.clone();
     let last_toggle = Cell::new(Instant::now() - Duration::from_secs(1));
@@ -508,14 +557,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         slint::TimerMode::Repeated,
         Duration::from_millis(60),
         move || {
-            let (Some(popup), Some(settings), Some(add), Some(editor)) = (
-                tick_popup.upgrade(),
-                tick_settings.upgrade(),
-                tick_add.upgrade(),
-                tick_editor.upgrade(),
-            ) else {
-                return;
-            };
+            let mut windows = tick_shell.borrow_mut();
             let mut changed = false;
             let mut redraw = false;
             while let Ok(command) = commands.try_recv() {
@@ -524,8 +566,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if last_toggle.get().elapsed() >= Duration::from_millis(300) =>
                     {
                         last_toggle.set(Instant::now());
-                        let open = !popup.window().is_visible() || data.borrow().closing;
-                        animate(&popup, &data, &slide, open);
+                        if let Some(popup) = ensure_popup(&mut windows, &data, &tx) {
+                            paint(&windows, &data.borrow().config);
+                            fill(&windows, &data.borrow());
+                            let open = !popup.window().is_visible() || data.borrow().closing;
+                            animate(&popup, &data, &slide, open);
+                        }
                     }
                     Command::Refresh => {
                         if !data.borrow().busy {
@@ -534,31 +580,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Command::Dismiss => {
-                        if popup.window().is_visible() && !data.borrow().closing {
-                            animate(&popup, &data, &slide, false);
+                        if let Some(popup) = &windows.popup {
+                            if popup.window().is_visible() && !data.borrow().closing {
+                                animate(popup, &data, &slide, false);
+                            }
                         }
                     }
                     Command::Settings | Command::Add => {
                         let show_add = matches!(command, Command::Add);
-                        if popup.window().is_visible() && !popup.get_pinned() {
-                            animate(&popup, &data, &slide, false);
-                        }
-                        settings.show().ok();
-                        if show_add {
-                            add.show().ok();
-                            let _ = add.window().with_winit_window(|w| {
-                                w.set_minimized(false);
-                                w.focus_window();
-                            });
-                            if !data.borrow().busy {
-                                let _ = refresh.send(());
+                        if let Some(popup) = &windows.popup {
+                            if popup.window().is_visible() && !popup.get_pinned() {
+                                animate(popup, &data, &slide, false);
                             }
                         }
-                        if !show_add {
+                        if let Some(settings) = ensure_settings(&mut windows, &tx) {
+                            paint(&windows, &data.borrow().config);
+                            fill(&windows, &data.borrow());
+                            settings.show().ok();
                             let _ = settings.window().with_winit_window(|w| {
                                 w.set_minimized(false);
                                 w.focus_window();
                             });
+                            if show_add {
+                                settings.invoke_open_add();
+                                if !data.borrow().busy {
+                                    let _ = refresh.send(());
+                                }
+                            }
                         }
                     }
                     Command::Select(index) => {
@@ -576,42 +624,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Command::Edit(index) => {
                         let device = data.borrow().config.devices.get(index).cloned();
-                        if let Some(device) = device {
+                        if let (Some(device), Some(settings)) = (device, &windows.settings) {
                             data.borrow_mut().editing = Some(device.id);
-                            editor.set_device_name(device.name.into());
-                            editor.set_kind_index(device.kind as i32);
-                            editor.set_error("".into());
-                            editor.show().ok();
-                            let _ = editor.window().with_winit_window(|w| {
-                                w.set_minimized(false);
-                                w.focus_window();
-                            });
+                            settings.set_edit_name(device.name.into());
+                            settings.set_edit_kind(device.kind as i32);
+                            settings.set_edit_error("".into());
+                            settings.invoke_open_editor();
                         }
                     }
                     Command::SaveEdit(name, index) => {
-                        let name: String = name.trim().chars().take(80).collect();
-                        if name.is_empty() {
-                            editor.set_error("Введите название устройства.".into());
-                        } else {
-                            let mut state = data.borrow_mut();
-                            let id = state.editing.clone();
-                            if let Some(device) = state
-                                .config
-                                .devices
-                                .iter_mut()
-                                .find(|d| Some(&d.id) == id.as_ref())
-                            {
-                                device.name = name;
-                                device.kind = match index {
-                                    0 => device::Kind::Mouse,
-                                    1 => device::Kind::Keyboard,
-                                    2 => device::Kind::Headset,
-                                    3 => device::Kind::Gamepad,
-                                    _ => device::Kind::Other,
-                                };
-                                changed = true;
+                        if let Some(settings) = &windows.settings {
+                            let name: String = name.trim().chars().take(80).collect();
+                            if name.is_empty() {
+                                settings.set_edit_error("Введите название устройства.".into());
+                            } else {
+                                let mut state = data.borrow_mut();
+                                let id = state.editing.clone();
+                                if let Some(device) = state
+                                    .config
+                                    .devices
+                                    .iter_mut()
+                                    .find(|d| Some(&d.id) == id.as_ref())
+                                {
+                                    device.name = name;
+                                    device.kind = match index {
+                                        0 => device::Kind::Mouse,
+                                        1 => device::Kind::Keyboard,
+                                        2 => device::Kind::Headset,
+                                        3 => device::Kind::Gamepad,
+                                        _ => device::Kind::Other,
+                                    };
+                                    changed = true;
+                                }
+                                settings.invoke_close_editor();
                             }
-                            editor.hide().ok();
                         }
                     }
                     Command::Theme(index) => {
@@ -694,17 +740,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             if changed {
-                if let Err(e) = config::save(&data.borrow().config) {
-                    settings.set_error(format!("Не удалось сохранить настройки: {e}").into());
-                } else {
-                    settings.set_error("".into());
+                let error = config::save(&data.borrow().config)
+                    .err()
+                    .map(|e| format!("Не удалось сохранить настройки: {e}"))
+                    .unwrap_or_default();
+                if !error.is_empty() {
+                    eprintln!("shinpi: {error}");
+                }
+                if let Some(settings) = &windows.settings {
+                    settings.set_error(error.into());
                 }
             }
             if changed || redraw || last_theme.get().elapsed() >= Duration::from_secs(2) {
                 last_theme.set(Instant::now());
                 let state = data.borrow();
-                paint(&popup, &settings, &add, &editor, &state.config);
-                fill(&popup, &settings, &add, &state);
+                paint(&windows, &state.config);
+                fill(&windows, &state);
             }
             {
                 let state = data.borrow();
@@ -713,7 +764,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cfg.minimum(),
                     cfg.tray_orientation,
                     cfg.colored_icon,
-                    popup.get_dark(),
+                    theme::resolved(&cfg.theme, theme::system_dark()) == "dark",
                 );
                 if last_icon.get() != Some(signature) || changed || redraw {
                     last_icon.set(Some(signature));
@@ -737,23 +788,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                 }
             }
-            let should_close = {
-                let state = data.borrow();
-                popup.window().is_visible()
-                    && !popup.get_pinned()
-                    && !state.closing
-                    && state.opened.elapsed() >= Duration::from_millis(350)
-                    && state
-                        .blur
-                        .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
-            };
-            if should_close {
-                animate(&popup, &data, &slide, false);
+            if let Some(popup) = &windows.popup {
+                let should_close = {
+                    let state = data.borrow();
+                    popup.window().is_visible()
+                        && !popup.get_pinned()
+                        && !state.closing
+                        && state.opened.elapsed() >= Duration::from_millis(350)
+                        && state
+                            .blur
+                            .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
+                };
+                if should_close {
+                    animate(popup, &data, &slide, false);
+                }
             }
         },
     );
     if args.iter().any(|a| a == "--window") {
-        animate(&popup, &state, &animation, true);
+        let _ = sender.send(Command::Toggle);
     }
     slint::run_event_loop_until_quit()?;
     Ok(())
@@ -763,5 +816,19 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("shinpi: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+    #[test]
+    fn native_identity_is_set_before_mapping_and_windows_cannot_resize() {
+        let popup = window_attributes(winit::window::WindowAttributes::default(), true);
+        let settings = window_attributes(winit::window::WindowAttributes::default(), false);
+        assert_eq!(popup.title, "shinpi-devices");
+        assert_eq!(settings.title, "shinpi");
+        assert!(!popup.resizable && !settings.resizable);
+        assert!(popup.transparent && !settings.transparent);
     }
 }

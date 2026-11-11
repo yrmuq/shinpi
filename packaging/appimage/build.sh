@@ -1,5 +1,5 @@
 #!/bin/sh
-# Adapted from yoin, Copyright (C) 2026 yrmuq.
+# Copyright (C) 2026 yrmuq.
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -eu
 
@@ -57,7 +57,7 @@ cp "$PACK/AppRun" "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 cp "$ROOT/packaging/io.github.yrmuq.shinpi.desktop" "$APPDIR/shinpi.desktop"
 cp "$APPDIR/shinpi.desktop" "$APPDIR/usr/share/applications/io.github.yrmuq.shinpi.desktop"
-cp "$ROOT/ui/icons/battery.svg" "$APPDIR/shinpi.svg"
+cp "$ROOT/assets/icon.svg" "$APPDIR/shinpi.svg"
 cp "$APPDIR/shinpi.svg" "$APPDIR/.DirIcon"
 cp "$APPDIR/shinpi.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/shinpi.svg"
 
