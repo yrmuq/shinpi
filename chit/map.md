@@ -19,9 +19,10 @@
 - `.github/workflows/release.yml` — обычный релиз после merge `dev` в `main` и возврат версии в `dev`.
 - `.github/dependabot.yml`, `.github/workflows/deps.yml`, `.github/workflows/pins.yml` — ежемесячные обновления Cargo/Actions/appimagetool и сборка/публикация prerelease на `deps`.
 - `.github/actions/setup/`, `packaging/check.sh` — общие библиотеки, Rust, кеш и проверки для CI.
-- `packaging/release/` — подготовка версий, описаний, публикация CI-релизов и синхронизация `dev`.
+- `packaging/tools/src/flow.rs`, `notes.rs`, `pins.rs` — служебная утилита Rust: подготовка версий и описаний, публикация CI-релизов, синхронизация `dev` и обновление `appimagetool`.
+- `packaging/tools/src/draft.rs`, `checks.rs` — обновление черновика, проверка JSON показаний и zsync, создание `flatpakref`; не включаются в приложение.
 - `packaging/appimage/` — сборка x86_64 AppImage, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
-- `tests/test_release.py` — релиз, накопление обновлений и защита от конкурентной перезаписи на временных Git-репозиториях.
+- `packaging/tools/tests/` — релиз и синхронизация веток на временных Git-репозиториях, защита публикации и черновика, контрольные суммы и закреплённые инструменты.
 - `assets/icon.svg` — горизонтальный зелёный значок приложения для окон, AppImage и README.
 
 - `packaging/flatpak/` — сборка x86_64 в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.

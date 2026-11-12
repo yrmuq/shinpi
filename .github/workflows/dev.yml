@@ -40,6 +40,7 @@ jobs:
             dist/shinpi-x86_64.AppImage.zsync
             dist/*.flatpak
             dist/*.flatpak.sha256
+            target/debug/shinpi-tools
           if-no-files-found: error
           retention-days: 3
   publish:
@@ -56,12 +57,14 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: development-appimage
-          path: dist
+          path: .
       - name: Update draft for the current dev commit
         env:
           GH_TOKEN: ${{ github.token }}
           INCLUDE_FLATPAK: ${{ inputs.include_flatpak }}
-        run: python3 packaging/appimage/draft.py
+        run: |
+          chmod +x target/debug/shinpi-tools
+          target/debug/shinpi-tools draft
 
   distribution-preflight:
     if: inputs.include_flatpak == true

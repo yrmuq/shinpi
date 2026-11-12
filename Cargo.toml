@@ -6,6 +6,11 @@ license = "GPL-3.0-or-later"
 description = "Wireless device batteries in a native KDE tray popup"
 publish = false
 
+[workspace]
+members = ["packaging/tools"]
+default-members = ["."]
+resolver = "2"
+
 [dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["linux-native-basic-udev"] }
 ksni = "0.3"
