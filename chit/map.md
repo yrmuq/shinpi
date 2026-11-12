@@ -9,9 +9,10 @@
 - `src/notify.rs` — общий порог/интервал и уведомления через `org.freedesktop.Notifications`.
 - `src/i18n.rs`, `languages/*.ini` — English/русский, системная локаль, ручной выбор и внешние переводы.
 - `src/theme.rs`, `src/icons.rs` — темы, шрифты KDE и значки.
+- `src/updates.rs` — ручная проверка стабильного релиза GitHub и открытие ссылок через desktop portal.
 - `src/tray.rs` — StatusNotifier через `ksni`.
 - `src/place.rs`, `kwin/placer.js` — размещение связанных панелей устройств и уведомлений у панели KWin.
-- `ui/app.slint` — панели устройств/уведомлений, настройки и дочерние диалоги добавления/редактирования; `slint` с `FemtoVG`.
+- `ui/app.slint` — панели устройств/уведомлений, настройки, «О программе» и дочерние диалоги добавления/редактирования/диагностики; `slint` с `FemtoVG`.
 - `packaging/` — desktop entry и правила `udev` для поддерживаемых HID.
 - `tests/placement.mjs` — размещение у четырёх сторон панели и границ экрана.
 - `.github/workflows/check.yml` — форматирование, Clippy, тесты и проверка CLI на `dev`.

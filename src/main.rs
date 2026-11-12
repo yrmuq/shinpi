@@ -9,6 +9,7 @@ mod place;
 mod system;
 mod theme;
 mod tray;
+mod updates;
 
 use slint::{
     winit_030::{winit, EventResult, WinitWindowAccessor},
@@ -40,11 +41,14 @@ struct State {
     editing: Option<String>,
     pending_notifications: HashSet<String>,
     notification_error: String,
+    update: updates::Status,
 }
 
 enum Event {
     Started,
     Scanned(device::Scan),
+    UpdateChecked(Result<Option<String>, ()>),
+    LinkOpened(Result<(), String>),
     Notified(String, u64, String, Result<(), String>),
 }
 
@@ -387,6 +391,14 @@ fn ensure_settings(
         let _ = tx.send(Command::HistoryCount(value as u32));
     });
 
+    let tx = sender.clone();
+    settings.on_check_update(move || {
+        let _ = tx.send(Command::CheckUpdate);
+    });
+    let tx = sender.clone();
+    settings.on_open_link(move |index| {
+        let _ = tx.send(Command::OpenLink(index));
+    });
     let weak = settings.as_weak();
     settings.on_dismiss(move || {
         if let Some(settings) = weak.upgrade() {
@@ -453,6 +465,23 @@ fn paint(shell: &Shell, state: &State) {
     }
     if let Some(settings) = &shell.settings {
         window_style!(settings);
+        settings.set_version(env!("CARGO_PKG_VERSION").into());
+        settings.set_checking_update(matches!(state.update, updates::Status::Checking));
+        settings.set_update_available(matches!(state.update, updates::Status::Available(_)));
+        settings.set_update_status(
+            match &state.update {
+                updates::Status::Idle => String::new(),
+                updates::Status::Checking => catalog.tr("Checking for updates…"),
+                updates::Status::Current => catalog.tr("You are using the latest version."),
+                updates::Status::Available(version) => {
+                    catalog.trf("Version {} is available.", &[version])
+                }
+                updates::Status::Failed => {
+                    catalog.tr("Could not check for updates. Try again later.")
+                }
+            }
+            .into(),
+        );
         settings.set_panel_width(cfg.panel_width as i32);
         settings.set_history_enabled(cfg.history_enabled);
         settings.set_history_count(cfg.history_count as i32);
@@ -721,6 +750,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         editing: None,
         pending_notifications: HashSet::new(),
         notification_error: String::new(),
+        update: updates::Status::Idle,
     }));
     let (sender, mut commands) = tokio::sync::mpsc::unbounded_channel();
     let (refresh, mut refresh_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -754,6 +784,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("shinpi: KWin positioning unavailable; using compositor placement");
     }
     let notification_tx = results_tx.clone();
+    let update_tx = results_tx.clone();
     runtime.spawn(async move {
         loop {
             if results_tx.send(Event::Started).is_err() {
@@ -957,6 +988,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             redraw = true;
                         }
                     }
+                    Command::CheckUpdate => {
+                        if !matches!(data.borrow().update, updates::Status::Checking) {
+                            data.borrow_mut().update = updates::Status::Checking;
+                            redraw = true;
+                            let tx = update_tx.clone();
+                            rt_handle.spawn(async move {
+                                let result = tokio::task::spawn_blocking(updates::check)
+                                    .await
+                                    .unwrap_or(Err(()));
+                                let _ = tx.send(Event::UpdateChecked(result));
+                            });
+                        }
+                    }
+                    Command::OpenLink(index) => {
+                        let tx = update_tx.clone();
+                        rt_handle.spawn(async move {
+                            let result = updates::open_link(index).await.map_err(|e| e.to_string());
+                            let _ = tx.send(Event::LinkOpened(result));
+                        });
+                    }
                     Command::Quit => {
                         let _ = slint::quit_event_loop();
                     }
@@ -967,6 +1018,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 redraw = true;
                 let mut state = data.borrow_mut();
                 match event {
+                    Event::UpdateChecked(result) => {
+                        state.update = match result {
+                            Ok(Some(version)) => updates::Status::Available(version),
+                            Ok(None) => updates::Status::Current,
+                            Err(()) => updates::Status::Failed,
+                        };
+                    }
+                    Event::LinkOpened(result) => {
+                        if let Some(settings) = &windows.settings {
+                            settings.set_error(if result.is_err() {
+                                state.catalog.tr("Could not open the link.").into()
+                            } else {
+                                "".into()
+                            });
+                        }
+                    }
                     Event::Started => state.busy = true,
                     Event::Scanned(result) => {
                         state.busy = false;

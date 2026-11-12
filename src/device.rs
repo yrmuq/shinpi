@@ -60,7 +60,7 @@ impl Reading {
     pub fn text(&self) -> String {
         let value = self
             .percent
-            .map(|p| format!("{}{p}%", if self.approximate { "≈" } else { "" }))
+            .map(|p| format!("{p}%"))
             .or_else(|| self.level.clone())
             .unwrap_or_else(|| "Нет данных".into());
         if self.charging {

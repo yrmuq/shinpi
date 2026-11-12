@@ -41,7 +41,9 @@
 | Gear icon | Open settings. |
 | `Add` | Choose a discovered device to display. |
 | Pencil in Settings | Change a device's name and icon. |
-| Remove in Settings | Remove a device from the panel. |
+| Red `×` in Settings | Remove a device from the panel. |
+| Diagnostics in Settings → Devices | Open source and access diagnostics. |
+| Check for updates in About | Check the latest stable version and open its release page. |
 | Triangle | Toggle notification history. |
 | `×` on a notification | Dismiss the entry. |
 | Pin icon | Keep the panel open when it loses focus. |
