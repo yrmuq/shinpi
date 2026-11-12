@@ -14,7 +14,7 @@
 
 `shinpi` is a Linux tray application for checking device battery levels in one place. Built with Rust, Slint and FemtoVG, it provides native windows styled for KDE Plasma without a browser engine.
 
-![shinpi notification and battery settings](assets/screenshot.png)
+![shinpi notification and battery settings](assets/screenshot.webp)
 
 ---
 
