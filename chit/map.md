@@ -25,7 +25,7 @@
 - `packaging/tools/src/draft.rs`, `checks.rs` — обновление черновика, проверка JSON показаний и zsync, создание `flatpakref`; не включаются в приложение.
 - `packaging/appimage/` — сборка x86_64 AppImage, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
 - `packaging/tools/tests/` — релиз и синхронизация веток на временных Git-репозиториях, защита публикации и черновика, контрольные суммы и закреплённые инструменты.
-- `assets/icon.svg`, `assets/screenshot.png` — значок приложения и настоящий скриншот настроек для README.
+- `assets/icon.svg`, `assets/screenshot.webp` — значок приложения и настоящий скриншот настроек для README.
 
 - `packaging/flatpak/` — сборка x86_64 в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.
 - `packaging/release/build.sh` — полная сборка x86_64 AppImage и Flatpak.
