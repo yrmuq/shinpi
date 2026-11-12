@@ -74,6 +74,8 @@ cp "$APPDIR/shinpi.svg" "$APPDIR/.DirIcon"
 cp "$APPDIR/shinpi.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/shinpi.svg"
 
 OUT="$DIST/shinpi-$ARCH.AppImage"
+# zsyncmake writes its output in the working directory.
+cd "$DIST"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream \
     -u "gh-releases-zsync|yrmuq|shinpi|latest|shinpi-$ARCH.AppImage.zsync" "$APPDIR" "$OUT"
 chmod +x "$OUT"

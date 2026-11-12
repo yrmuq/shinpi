@@ -17,7 +17,7 @@ jobs:
   appimage:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.include_flatpak && 90 || 30 }}
     concurrency:
       group: development-build
       cancel-in-progress: true
@@ -76,6 +76,7 @@ jobs:
         with:
           enablement: true
       - name: Verify the Flatpak signing secret
+        if: ${{ !cancelled() }}
         env:
           FLATPAK_GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
         run: |

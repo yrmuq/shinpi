@@ -1,7 +1,7 @@
 FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
-    libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev file zsync curl \
+    libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev file zsync curl desktop-file-utils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
