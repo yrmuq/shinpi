@@ -28,6 +28,7 @@ elif [ "$CHANNEL" = prerelease ]; then
 fi
 flatpak build-bundle "$@" flatpak-repo "dist/shinpi-$ARCH.flatpak" io.github.yrmuq.shinpi "$CHANNEL" --arch="$ARCH"
 (cd dist && sha256sum "shinpi-$ARCH.flatpak" > "shinpi-$ARCH.flatpak.sha256")
-dbus-run-session -- flatpak-builder --user --arch="$ARCH" --run "flatpak-build/$ARCH" \
+# --run uses a separate parser and rejects --user.
+dbus-run-session -- flatpak-builder --arch="$ARCH" --run "flatpak-build/$ARCH" \
     packaging/flatpak/io.github.yrmuq.shinpi.json shinpi --help
 rm -rf "flatpak-build/$ARCH"
