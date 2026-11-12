@@ -4428,7 +4428,7 @@ dependencies = [
 
 [[package]]
 name = "shinpi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "hidapi",
  "ksni",
