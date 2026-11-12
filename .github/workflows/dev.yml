@@ -31,7 +31,7 @@ jobs:
       - run: sh packaging/appimage/check.sh
       - if: inputs.include_flatpak == true
         run: sh packaging/flatpak/build.sh x86_64 test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: development-appimage
           path: |
@@ -53,7 +53,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: development-appimage
           path: dist
@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         with:
           enablement: true
       - name: Verify the Flatpak signing secret
