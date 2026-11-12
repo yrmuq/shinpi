@@ -106,7 +106,7 @@ component DeviceLine inherits Rectangle {
     in property <bool> show-source: false;
     height: 40px;
     min-width: 0px;
-    clip: true;
+    // Rounded clipping resamples text through an intermediate texture.
     border-radius: Breeze.radius;
     border-width: 1px;
     border-color: Breeze.frame;
