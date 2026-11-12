@@ -42,6 +42,9 @@ impl ksni::Tray for Tray {
     fn title(&self) -> String {
         "shinpi".into()
     }
+    fn category(&self) -> ksni::Category {
+        ksni::Category::Hardware
+    }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         self.icons.clone()
     }

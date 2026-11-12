@@ -7,12 +7,17 @@ function textOf(value) {
     return value == null ? "" : String(value);
 }
 
+function isOurs(window) {
+    const klass = String(window.resourceClass);
+    return !window.dialog && (klass === "shinpi" || klass === "shinpi-popup");
+}
+
 function isPopup(window) {
-    return textOf(window.caption) === "shinpi-devices" && String(window.resourceClass) === "shinpi" && !window.dialog;
+    return isOurs(window) && textOf(window.caption) === "shinpi-devices";
 }
 
 function isNotice(window) {
-    return textOf(window.caption) === "shinpi-notices" && String(window.resourceClass) === "shinpi" && !window.dialog;
+    return isOurs(window) && textOf(window.caption) === "shinpi-notices";
 }
 
 function visibleNotices() {
@@ -178,6 +183,7 @@ function track(window) {
     const entry = { window: window, anchor: null, moving: false };
     windows.set(window, entry);
     const onShow = () => {
+        hideFromTaskbar(window);
         entry.anchor = selectAnchor(window);
         place(entry);
     };
@@ -201,6 +207,7 @@ function trackNotice(window) {
     hideFromTaskbar(window);
     window.keepAbove = true;
     const update = () => {
+        hideFromTaskbar(window);
         for (const entry of windows.values()) { place(entry); }
         repositionNotices();
     };

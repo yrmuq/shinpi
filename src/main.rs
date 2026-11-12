@@ -98,7 +98,42 @@ struct Shell {
     notices: Option<Notices>,
 }
 
-thread_local! { static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") }; }
+thread_local! {
+    static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") };
+    static POPUP_CLASS_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+const POPUP_CLASS: &str = "shinpi-popup";
+
+/// Wayland destroys a hidden popup and maps the next one before its title exists.
+/// Hold a dedicated application id until that window exists so KWin skips the taskbar.
+fn hold_popup_class() {
+    if POPUP_CLASS_HELD.replace(true) {
+        return;
+    }
+    let _ = slint::set_xdg_app_id(POPUP_CLASS);
+}
+
+fn release_popup_class(shell: &Shell) {
+    if !POPUP_CLASS_HELD.get() {
+        return;
+    }
+    let pending =
+        |window: &slint::Window| window.is_visible() && window.with_winit_window(|_| ()).is_none();
+    if shell
+        .popup
+        .as_ref()
+        .is_some_and(|popup| pending(popup.window()))
+        || shell
+            .notices
+            .as_ref()
+            .is_some_and(|notices| pending(notices.window()))
+    {
+        return;
+    }
+    POPUP_CLASS_HELD.set(false);
+    let _ = slint::set_xdg_app_id("shinpi");
+}
 
 fn window_attributes(
     attributes: winit::window::WindowAttributes,
@@ -125,6 +160,7 @@ fn ensure_popup(
     if let Some(popup) = &shell.popup {
         return Some(popup.clone_strong());
     }
+    hold_popup_class();
     CREATING_PANEL.set("shinpi-devices");
     let result = Popup::new();
     if let Ok(popup) = &result {
@@ -213,6 +249,7 @@ fn ensure_notices(
         return Some(notices.clone_strong());
     }
     let popup = shell.popup.as_ref()?;
+    hold_popup_class();
     CREATING_PANEL.set("shinpi-notices");
     let result = Notices::new();
     if let Ok(notices) = &result {
@@ -270,6 +307,7 @@ fn sync_notices(
         fill(shell, &state.borrow());
     }
     if !notices.window().is_visible() {
+        hold_popup_class();
         notices.set_expanded(false);
         let _ = notices.get_slide();
         let _ = notices.show();
@@ -649,6 +687,7 @@ fn fill(shell: &Shell, state: &State) {
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
     timer.stop();
     if open {
+        hold_popup_class();
         popup.set_slide(popup.get_layout_height());
         if let Err(e) = popup.show() {
             eprintln!("shinpi: {e}");
@@ -817,6 +856,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         slint::TimerMode::Repeated,
         Duration::from_millis(60),
         move || {
+            release_popup_class(&tick_shell.borrow());
             let mut windows = tick_shell.borrow_mut();
             let mut changed = false;
             let mut redraw = false;

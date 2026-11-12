@@ -88,15 +88,13 @@ skippager=true
 skippagerrule=2
 skipswitcher=true
 skipswitcherrule=2
-title=shinpi-(devices|notices)
-titlematch=3
-wmclass=shinpi
+wmclass=shinpi-popup
 wmclassmatch=1
 wmclasscomplete=false
 ";
 
-/// KWin applies window rules while the window is created, before the task
-/// manager can show an icon. Returns true when the file changed.
+/// KWin applies window rules while the window is created. The popup class is
+/// set before mapping, before a title exists, so the task manager never sees it.
 fn write_taskbar_rule() -> bool {
     let path = crate::config::config_dir()
         .parent()
@@ -148,7 +146,10 @@ fn rewrite_tray_rule(text: &str) -> String {
 }
 fn merge_kwin_rules(text: &str) -> Option<String> {
     if text.contains("[shinpi-tray]") {
-        if text.contains("title=shinpi-(devices|notices)\n") && text.contains("titlematch=3\n") {
+        if text.contains("wmclass=shinpi-popup\n")
+            && text.contains("wmclassmatch=1\n")
+            && !text.contains("title=")
+        {
             return None;
         }
         return Some(rewrite_tray_rule(text));
@@ -222,18 +223,19 @@ mod tests {
         assert!(first.contains("rules=1,shinpi-tray\n"));
         assert!(first.contains("count=2\n"));
         assert!(first.contains("skiptaskbar=true\n"));
-        assert!(first.contains("title=shinpi-(devices|notices)\n"));
-        assert!(first.contains("titlematch=3\n"));
+        assert!(first.contains("wmclass=shinpi-popup\n"));
+        assert!(first.contains("wmclassmatch=1\n"));
+        assert!(!first.contains("title="));
         assert!(merge_kwin_rules(&first).is_none());
         let stale = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nwmclass=shinpi\nskiptaskbar=true\n";
         let updated = merge_kwin_rules(stale).unwrap();
-        assert!(updated.contains("title=shinpi-(devices|notices)\n"));
-        assert!(!updated.contains("Description=shinpi tray windows\n"));
+        assert!(updated.contains("wmclass=shinpi-popup\n"));
+        assert!(!updated.contains("wmclass=shinpi\n"));
         assert!(merge_kwin_rules(&updated).is_none());
-        let old = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nDescription=shinpi tray popup\ntitle=shinpi-devices\ntitlematch=1\nwmclass=shinpi\n";
+        let old = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nDescription=shinpi tray popup\ntitle=shinpi-(devices|notices)\ntitlematch=3\nwmclass=shinpi\nwmclassmatch=1\n";
         let fixed = merge_kwin_rules(old).unwrap();
-        assert!(fixed.contains("title=shinpi-(devices|notices)\n"));
-        assert!(!fixed.contains("title=shinpi-devices\n"));
+        assert!(fixed.contains("wmclass=shinpi-popup\n"));
+        assert!(!fixed.contains("title="));
         assert!(merge_kwin_rules(&fixed).is_none());
         let empty = merge_kwin_rules("").unwrap();
         assert!(empty.contains("[shinpi-tray]\n"));

@@ -411,6 +411,25 @@ component SettingRow inherits HorizontalLayout {
     @children
 }
 
+component AboutLink inherits Rectangle {
+    in property <string> label;
+    callback activate;
+    background: transparent;
+    VerticalLayout {
+        spacing: 0px;
+        Text { text: root.label; color: Breeze.selection; }
+        Rectangle { height: 1px; background: Breeze.selection; }
+    }
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.activate(); }
+    }
+}
+
 export component Settings inherits Window {
     title: "shinpi";
     icon: @image-url("../assets/icon.svg");
@@ -688,42 +707,51 @@ export component Settings inherits Window {
             Tab {
                 title: Translations.tr(93);
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 16px;
+                    padding-left: 23px;
+                    padding-right: 23px;
+                    padding-top: 23px;
+                    padding-bottom: 12px;
+                    spacing: 8px;
                     alignment: start;
                     HorizontalLayout {
                         alignment: center;
                         Image { source: @image-url("../assets/icon.svg"); width: 96px; height: 96px; }
                     }
-                    Text { text: "shinpi"; color: Breeze.fg; font-size: 24px; font-weight: 600; horizontal-alignment: center; }
-                    SettingRow {
-                        label: Translations.tr(94);
-                        Text { text: root.version; color: Breeze.fg; vertical-alignment: center; }
+                    Text {
+                        text: "shinpi";
+                        color: Breeze.fg;
+                        font-weight: 700;
+                        horizontal-alignment: center;
                     }
-                    SettingRow {
-                        label: Translations.tr(95);
-                        Button { text: "yrmuq/shinpi"; clicked => { root.open-link(0); } }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Text { text: Translations.tr(95) + ":"; color: Breeze.fg; vertical-alignment: center; }
+                        AboutLink { label: "yrmuq/shinpi"; activate => { root.open-link(0); } }
                     }
-                    SettingRow {
-                        label: Translations.tr(96);
+                    Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; }
+                    HorizontalLayout {
+                        alignment: start;
                         Button {
                             text: Translations.tr(97);
                             enabled: !root.checking-update;
                             clicked => { root.check-update(); }
                         }
                     }
-                    if root.update-status != "": Text { text: root.update-status; color: Breeze.inactive; wrap: word-wrap; }
+                    if root.update-status != "": Text { text: root.update-status; color: Breeze.fg; wrap: word-wrap; }
                     if root.update-available: HorizontalLayout {
-                        alignment: end;
+                        alignment: start;
                         Button { text: Translations.tr(98); clicked => { root.open-link(1); } }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
-                    SettingRow {
-                        label: Translations.tr(99);
-                        HorizontalLayout {
-                            Button { text: "Slint"; clicked => { root.open-link(2); } }
-                            Button { text: "KDE"; clicked => { root.open-link(3); } }
-                        }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Text { text: Translations.tr(99); color: Breeze.fg; vertical-alignment: center; }
+                        Text { text: "♥"; color: Breeze.selection; vertical-alignment: center; }
+                        AboutLink { label: "Slint"; activate => { root.open-link(2); } }
+                        Text { text: Translations.tr(105); color: Breeze.fg; vertical-alignment: center; }
+                        AboutLink { label: "KDE"; activate => { root.open-link(3); } }
                     }
                 }
             }
