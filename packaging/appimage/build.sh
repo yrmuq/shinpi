@@ -12,17 +12,12 @@ mkdir -p "$CACHE" "$DIST"
 
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64) TOOL_ARCH=x86_64 ;;
-    aarch64) TOOL_ARCH=aarch64 ;;
+    x86_64) ;;
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
-TOOL="$CACHE/appimagetool-$TOOL_ARCH.AppImage"
+TOOL="$CACHE/appimagetool-x86_64.AppImage"
 TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
 TOOL_SHA="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
-if [ "$ARCH" = aarch64 ]; then
-    TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-aarch64.AppImage"
-    TOOL_SHA="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
-fi
 if [ ! -s "$TOOL" ] || ! echo "$TOOL_SHA  $TOOL" | sha256sum -c - >/dev/null 2>&1; then
     curl -fL --retry 3 -o "$TOOL.part" "$TOOL_URL"
     echo "$TOOL_SHA  $TOOL.part" | sha256sum -c -

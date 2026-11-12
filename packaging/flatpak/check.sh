@@ -14,6 +14,6 @@ if [ -f "$RUNNER_TEMP/previous-settings.json" ]; then
 fi
 ostree --repo=flatpak-repo remote delete --if-exists verify
 ostree --repo=flatpak-repo remote add --gpg-import=flatpak-repo/shinpi.gpg verify "file://$PWD/flatpak-repo"
-for ARCH in x86_64 aarch64; do
+for ARCH in x86_64; do
     ostree --repo=flatpak-repo show --gpg-verify-remote=verify "app/io.github.yrmuq.shinpi/$ARCH/stable"
 done

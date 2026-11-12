@@ -1,4 +1,5 @@
 version: 2
+# ARM images and qemu are out of scope while aarch64 packages are disabled.
 updates:
   - package-ecosystem: cargo
     directory: "/"
@@ -15,13 +16,10 @@ updates:
       interval: cron
       cronjob: "0 9 28 * *"
     open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: "docker/setup-qemu-action"
+      - dependency-name: "docker/setup-buildx-action"
+      - dependency-name: "docker/build-push-action"
     groups:
       actions:
-        patterns: ["*"]
-  - package-ecosystem: docker
-    directory: /packaging/appimage
-    schedule:
-      interval: monthly
-    groups:
-      build-images:
         patterns: ["*"]
