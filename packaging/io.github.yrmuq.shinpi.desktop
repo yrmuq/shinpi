@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=shinpi
+Comment=Wireless device battery levels
+Exec=shinpi
+Icon=shinpi
+Terminal=false
+Categories=Utility;
+StartupWMClass=shinpi

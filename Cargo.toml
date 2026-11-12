@@ -1,0 +1,28 @@
+[package]
+name = "shinpi"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Wireless device batteries in a native KDE tray popup"
+publish = false
+
+[dependencies]
+hidapi = { version = "2.6.7", default-features = false, features = ["linux-native-basic-udev"] }
+ksni = "0.3"
+libc = "0.2"
+resvg = { version = "=0.49.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-18", "backend-winit", "renderer-femtovg", "unstable-winit-030", "image-default-formats", "accessibility"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+zbus = "6"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+strip = true
+panic = "abort"

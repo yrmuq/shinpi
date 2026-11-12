@@ -1,0 +1,64 @@
+name: Pins
+
+on:
+  schedule:
+    - cron: "0 9 28 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-prerelease
+  cancel-in-progress: false
+
+jobs:
+  pins:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Update appimagetool and prepare prerelease
+        id: prepare
+        run: python3 packaging/release/flow.py prepare pins
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+      - name: Check source
+        if: steps.prepare.outputs.ready == 'true'
+        run: sh packaging/check.sh
+      - uses: docker/setup-qemu-action@v3
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+        if: steps.prepare.outputs.ready == 'true'
+      - name: Import the Flatpak signing key
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          FLATPAK_GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
+        run: sh packaging/flatpak/prepare.sh prerelease
+      - uses: docker/build-push-action@v6
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          context: .
+          file: packaging/appimage/arm64.Dockerfile
+          platforms: linux/arm64
+          outputs: type=local,dest=dist
+          cache-from: type=gha,scope=appimage-arm64
+          cache-to: type=gha,mode=max,scope=appimage-arm64
+      - name: Build and check distribution packages
+        if: steps.prepare.outputs.ready == 'true'
+        run: |
+          sh packaging/release/build.sh prerelease
+      - name: Publish pin prerelease
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          OLD_DEPS: ${{ steps.prepare.outputs.old_deps }}
+        run: python3 packaging/release/flow.py publish pins "$VERSION" "$OLD_DEPS"

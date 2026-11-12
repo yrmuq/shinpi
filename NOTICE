@@ -1,0 +1,12 @@
+shinpi
+Copyright (C) 2026 yrmuq
+
+This program is free software under GPL-3.0-or-later. See LICENSE.
+
+ui/icons/configure.svg and ui/icons/window-pin.svg are KDE Breeze icons,
+Copyright (C) 2014 Uri Herrera and others, LGPL-3.0-or-later.
+See ui/icons/COPYING.
+
+The battery acquisition code is independently implemented against Linux
+power_supply, BlueZ Battery1, UPower Device and device wire protocols.
+No third-party battery application source code is incorporated.

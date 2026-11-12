@@ -1,0 +1,10 @@
+/target/
+/work/
+/dist/
+/packaging/appimage/build/
+__pycache__/
+/vendor/
+/cargo/
+/flatpak-build/
+/flatpak-repo/
+/.flatpak-builder/

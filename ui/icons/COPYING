@@ -1,0 +1,9 @@
+configure.svg and window-pin.svg are from the KDE Breeze Icon Theme.
+Copyright (C) 2014 Uri Herrera <uri_herrera@nitrux.in> and others.
+License: LGPL-3.0-or-later.
+Source: https://invent.kde.org/frameworks/breeze-icons
+icons/actions/22/configure.svg
+icons/actions/22/window-pin.svg
+
+The remaining icons in this directory are original shinpi artwork,
+Copyright (C) 2026 yrmuq, GPL-3.0-or-later.

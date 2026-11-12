@@ -1,0 +1,87 @@
+name: Development build
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_flatpak:
+        description: Include an x86_64 Flatpak test bundle
+        type: boolean
+        default: false
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.include_flatpak && 90 || 30 }}
+    concurrency:
+      group: development-build
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache: appimage
+      - run: sh packaging/check.sh
+      - run: sh packaging/appimage/build.sh
+      - run: sh packaging/appimage/check.sh
+      - if: inputs.include_flatpak == true
+        run: sh packaging/flatpak/build.sh x86_64 test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: development-appimage
+          path: |
+            dist/shinpi-x86_64.AppImage
+            dist/shinpi-x86_64.AppImage.sha256
+            dist/shinpi-x86_64.AppImage.zsync
+            dist/*.flatpak
+            dist/*.flatpak.sha256
+          if-no-files-found: error
+          retention-days: 3
+  publish:
+    needs: appimage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: development-draft
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: development-appimage
+          path: dist
+      - name: Update draft for the current dev commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCLUDE_FLATPAK: ${{ inputs.include_flatpak }}
+        run: python3 packaging/appimage/draft.py
+
+  distribution-preflight:
+    if: inputs.include_flatpak == true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Verify the Flatpak signing secret
+        if: ${{ !cancelled() }}
+        env:
+          FLATPAK_GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
+        run: |
+          test -n "$FLATPAK_GPG_KEY" || { echo 'FLATPAK_GPG_KEY is missing'; exit 1; }
+          export GNUPGHOME="$RUNNER_TEMP/signing-preflight"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s' "$FLATPAK_GPG_KEY" | gpg --batch --import
+          printf preflight | gpg --batch --yes --detach-sign > "$RUNNER_TEMP/signature"

@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: cron
+      cronjob: "0 9 28 * *"
+    open-pull-requests-limit: 1
+    groups:
+      rust:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: cron
+      cronjob: "0 9 28 * *"
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /packaging/appimage
+    schedule:
+      interval: monthly
+    groups:
+      build-images:
+        patterns: ["*"]
