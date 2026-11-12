@@ -56,6 +56,8 @@
 
 The empty panel's `Add` button disappears after selecting a device; further devices are added through Settings. Sources are listed separately, so choose the source that works best for each device.
 
+Discrete battery levels are displayed as estimates: Critical `10%`, Low `25%`, Normal `50%`, High `75%`, Full `100%`. These estimates use the same color scale and notification threshold as numeric readings.
+
 </details>
 
 ---

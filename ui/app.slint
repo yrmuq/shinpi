@@ -13,7 +13,8 @@ export struct DeviceRow {
     detail: string,
     icon: image,
     tint: bool,
-    low: bool,
+    charge-color: color,
+    has-percent: bool,
     added: bool,
 }
 
@@ -42,11 +43,12 @@ export global Breeze {
 
 component ToolButton inherits Rectangle {
     in property <bool> active: false;
+    in property <bool> flat: false;
     callback clicked;
     width: 32px;
     height: 32px;
     border-radius: Breeze.radius;
-    background: active ? Breeze.selection : (hover.has-hover || keys.has-focus ? Breeze.button-hover : transparent);
+    background: flat ? transparent : (active ? Breeze.selection : (hover.has-hover || keys.has-focus ? Breeze.button-hover : transparent));
     border-width: active || keys.has-focus ? 1px : 0;
     border-color: Breeze.outline;
     VerticalLayout {
@@ -119,6 +121,7 @@ component DeviceLine inherits Rectangle {
         spacing: 10px;
         if root.editable: ToolButton {
             height: root.height;
+            flat: true;
             label: Translations.tr(48) + " " + root.entry.name;
             clicked => { root.edit(); }
             BreezeIcon { source: @image-url("icons/edit.svg"); ink: Breeze.fg; }
@@ -139,7 +142,7 @@ component DeviceLine inherits Rectangle {
         }
         Text {
             text: root.entry.charge;
-            color: root.entry.low ? #da4453 : Breeze.fg;
+            color: root.entry.has-percent ? root.entry.charge-color : Breeze.fg;
             font-weight: 600;
             vertical-alignment: center;
             min-width: 66px;
@@ -687,6 +690,7 @@ export component Settings inherits Window {
                                 ToolButton {
                                     height: 58px;
                                     label: Translations.tr(49) + " " + device.name;
+                                    flat: true;
                                     clicked => { root.remove-device(i); }
                                     Text { text: "×"; font-size: 24px; color: #da4453; }
                                 }

@@ -468,8 +468,8 @@ fn paint(shell: &Shell, state: &State) {
             window.global::<Translations>().set_strings(labels.clone());
             window.set_dark(dark);
             window.set_ui_font_family(font.family.clone().into());
-            let scale = window.window().scale_factor().max(1.0);
-            window.set_ui_font_size((font.size_px * scale).round() / scale);
+            // Slint applies DPI scaling; rounding before mapping changed the font on the next repaint.
+            window.set_ui_font_size(font.size_px);
             window.set_ui_font_weight(font.weight);
             let breeze = window.global::<Breeze>();
             breeze.set_window(color(palette.window));
@@ -587,7 +587,12 @@ fn row(
         detail: source.into(),
         icon,
         tint,
-        low: reading.low(15),
+        charge_color: reading
+            .band()
+            .map(icons::charge_color)
+            .map(color)
+            .unwrap_or_default(),
+        has_percent: reading.percentage().is_some(),
         added,
     }
 }

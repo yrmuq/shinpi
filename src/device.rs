@@ -57,14 +57,25 @@ pub struct Reading {
 }
 
 impl Reading {
+    pub fn percentage(&self) -> Option<u8> {
+        self.percent.or_else(|| match self.level.as_deref()? {
+            "Критический" => Some(10),
+            "Низкий" => Some(25),
+            "Средний" => Some(50),
+            "Высокий" => Some(75),
+            "Полный" => Some(100),
+            _ => None,
+        })
+    }
+
     pub fn text(&self) -> String {
         let value = self
-            .percent
+            .percentage()
             .map(|p| format!("{p}%"))
             .or_else(|| self.level.clone())
             .unwrap_or_else(|| "Нет данных".into());
         if self.charging {
-            if self.percent.is_some() {
+            if self.percentage().is_some() {
                 format!("ϟ {value}")
             } else {
                 "Заряжается".into()
@@ -75,12 +86,7 @@ impl Reading {
     }
 
     pub fn low(&self, threshold: u8) -> bool {
-        !self.charging
-            && (self.percent.is_some_and(|p| p <= threshold)
-                || self
-                    .level
-                    .as_deref()
-                    .is_some_and(|s| matches!(s, "Низкий" | "Критический")))
+        !self.charging && self.percentage().is_some_and(|p| p <= threshold)
     }
 }
 
@@ -94,21 +100,12 @@ pub enum Band {
 
 impl Reading {
     pub fn band(&self) -> Option<Band> {
-        if let Some(percent) = self.percent {
-            return Some(match percent {
-                100 => Band::Full,
-                51..=99 => Band::High,
-                26..=50 => Band::Medium,
-                _ => Band::Low,
-            });
-        }
-        match self.level.as_deref()? {
-            "Критический" | "Низкий" => Some(Band::Low),
-            "Средний" => Some(Band::Medium),
-            "Высокий" => Some(Band::High),
-            "Полный" => Some(Band::Full),
-            _ => None,
-        }
+        self.percentage().map(|percent| match percent {
+            100 => Band::Full,
+            51..=99 => Band::High,
+            26..=50 => Band::Medium,
+            _ => Band::Low,
+        })
     }
 }
 
@@ -193,12 +190,57 @@ mod tests {
             level: Some("Низкий".into()),
             ..Default::default()
         };
-        assert!(coarse.low(0));
+        assert!(!coarse.low(24));
+        assert!(coarse.low(25));
         assert_eq!(coarse.band(), Some(Band::Low));
         coarse.charging = true;
         assert!(!coarse.low(100));
         assert_eq!(Reading::default().band(), None);
         assert_eq!(address("AA_BB_CC_DD_EE_FF"), address("aa:bb:cc:dd:ee:ff"));
         assert!(address("aa:bb:cc:dd:ee:ff:00").is_none());
+    }
+
+    #[test]
+    fn estimated_levels_share_percentage_bands_and_thresholds() {
+        for (level, percent, band) in [
+            ("Критический", 10, Band::Low),
+            ("Низкий", 25, Band::Low),
+            ("Средний", 50, Band::Medium),
+            ("Высокий", 75, Band::High),
+            ("Полный", 100, Band::Full),
+        ] {
+            let mut reading = Reading {
+                level: Some(level.into()),
+                approximate: true,
+                ..Default::default()
+            };
+            assert_eq!(reading.percentage(), Some(percent));
+            assert_eq!(reading.text(), format!("{percent}%"));
+            assert_eq!(reading.band(), Some(band));
+            assert!(reading.low(percent));
+            assert!(!reading.low(percent - 1));
+            assert_eq!(reading.percent, None);
+            reading.charging = true;
+            assert_eq!(reading.text(), format!("ϟ {percent}%"));
+            assert!(!reading.low(100));
+            reading.percent = Some(0);
+            assert_eq!(reading.percentage(), Some(0));
+        }
+        let unknown = Reading {
+            level: Some("Unknown".into()),
+            ..Default::default()
+        };
+        assert_eq!(unknown.percentage(), None);
+        assert_eq!(unknown.band(), None);
+        assert!(!unknown.low(100));
+        assert_eq!(Reading::default().text(), "Нет данных");
+        assert_eq!(
+            Reading {
+                charging: true,
+                ..Default::default()
+            }
+            .text(),
+            "Заряжается"
+        );
     }
 }

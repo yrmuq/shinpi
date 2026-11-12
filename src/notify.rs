@@ -79,12 +79,12 @@ mod tests {
     use super::*;
     use crate::device::{Device, Kind};
     #[test]
-    fn common_interval_and_threshold_preserve_coarse_levels_and_suppress_stale_and_charging() {
+    fn common_interval_and_threshold_include_estimates_and_suppress_stale_and_charging() {
         let catalog = crate::i18n::Catalog::load("Russian");
         let mut percent = Device::new("one".into(), "Mouse".into(), Kind::Mouse, "HID");
         percent.reading.percent = Some(15);
         let mut coarse = Device::new("two".into(), "Pad".into(), Kind::Gamepad, "UPower");
-        coarse.reading.level = Some("Низкий".into());
+        coarse.reading.level = Some("Критический".into());
         let mut scan = Scan {
             devices: vec![percent, coarse],
             warnings: vec![],
@@ -102,10 +102,14 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(due(&restored, &scan, 13600, &catalog).len(), 2);
         config.low_threshold = 5;
-        assert_eq!(due(&config, &scan, 13600, &catalog).len(), 1);
+        assert!(due(&config, &scan, 13600, &catalog).is_empty());
+        config.low_threshold = 10;
         config.repeat_minutes = 120;
         assert!(due(&config, &scan, 13600, &catalog).is_empty());
         assert!(due(&config, &Scan::default(), 20000, &catalog).is_empty());
+        let critical = due(&config, &scan, 20000, &catalog);
+        assert_eq!(critical.len(), 1);
+        assert!(critical[0].1.contains("10%"));
         scan.devices[1].reading.charging = true;
         assert!(due(&config, &scan, 20000, &catalog).is_empty());
         config.notifications = false;

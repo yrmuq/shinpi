@@ -82,7 +82,7 @@ impl Catalog {
     }
 
     pub fn reading(&self, reading: &crate::device::Reading) -> String {
-        if reading.charging && reading.percent.is_none() {
+        if reading.charging && reading.percentage().is_none() {
             return self.tr("Charging");
         }
         let text = reading.text();
@@ -313,7 +313,7 @@ mod tests {
                 level: Some("Низкий".into()),
                 ..Default::default()
             }),
-            "Low"
+            "25%"
         );
         assert_eq!(
             ru.message("System D-Bus unavailable: timeout"),
