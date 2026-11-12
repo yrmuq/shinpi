@@ -25,6 +25,11 @@ case "$STATUS" in
         flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
         flatpak remote-add --user --if-not-exists --gpg-import="$RUNNER_TEMP/shinpi.gpg" shinpi-ci "file://$PWD/flatpak-repo"
         flatpak install --user --noninteractive shinpi-ci io.github.yrmuq.shinpi//stable
+        # A restored cache may contain an older application than the published baseline.
+        flatpak update --user --noninteractive io.github.yrmuq.shinpi
+        PREVIOUS_COMMIT=$(ostree --repo=flatpak-repo rev-parse app/io.github.yrmuq.shinpi/x86_64/stable)
+        INSTALLED_COMMIT=$(flatpak info --user --show-commit io.github.yrmuq.shinpi)
+        test "$INSTALLED_COMMIT" = "$PREVIOUS_COMMIT"
         mkdir -p "$HOME/.var/app/io.github.yrmuq.shinpi/config/shinpi"
         printf '{"language":"ru","panel_width":360}\n' > "$RUNNER_TEMP/previous-settings.json"
         cp "$RUNNER_TEMP/previous-settings.json" "$HOME/.var/app/io.github.yrmuq.shinpi/config/shinpi/config.json"
