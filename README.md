@@ -77,7 +77,7 @@ Download `shinpi-x86_64.AppImage` from the development draft. Use [Gear Lever](h
 
 ### Flatpak
 
-Flatpak packaging and a signed GitHub Pages update repository are being validated for `x86_64` and `arm64`. No public Flatpak installation source is available yet. Maintainers can request an `x86_64` test bundle with the Development build workflow's `include_flatpak` option; this does not enable stable updates or persist for subsequent builds.
+Flatpak packaging and a signed GitHub Pages update repository are being validated for `x86_64`. `arm64` packages are not built. No public Flatpak installation source is available yet. Maintainers can request an `x86_64` test bundle with the Development build workflow's `include_flatpak` option; this does not enable stable updates or persist for subsequent builds.
 
 ### HID Access
 

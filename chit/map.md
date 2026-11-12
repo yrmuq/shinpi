@@ -20,9 +20,9 @@
 - `.github/dependabot.yml`, `.github/workflows/deps.yml`, `.github/workflows/pins.yml` — ежемесячные обновления Cargo/Actions/appimagetool и сборка/публикация prerelease на `deps`.
 - `.github/actions/setup/`, `packaging/check.sh` — общие библиотеки, Rust, кеш и проверки для CI.
 - `packaging/release/` — подготовка версий, описаний, публикация CI-релизов и синхронизация `dev`.
-- `packaging/appimage/` — сборка AppImage обеих архитектур, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
+- `packaging/appimage/` — сборка x86_64 AppImage, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
 - `tests/test_release.py` — релиз, накопление обновлений и защита от конкурентной перезаписи на временных Git-репозиториях.
 - `assets/icon.svg` — горизонтальный зелёный значок приложения для окон, AppImage и README.
 
-- `packaging/flatpak/` — сборка обеих архитектур в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.
-- `packaging/release/build.sh`, `packaging/appimage/arm64.Dockerfile` — полная сборка форматов; ARM AppImage через Buildx/QEMU.
+- `packaging/flatpak/` — сборка x86_64 в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.
+- `packaging/release/build.sh` — полная сборка x86_64 AppImage и Flatpak.

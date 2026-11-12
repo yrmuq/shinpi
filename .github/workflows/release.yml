@@ -35,26 +35,11 @@ jobs:
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh
-      - uses: docker/setup-qemu-action@v3
-        if: steps.prepare.outputs.ready == 'true'
-        with:
-          platforms: arm64
-      - uses: docker/setup-buildx-action@v3
-        if: steps.prepare.outputs.ready == 'true'
       - name: Import signing key and retain the stable repository
         if: steps.prepare.outputs.ready == 'true'
         env:
           FLATPAK_GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
         run: sh packaging/flatpak/prepare.sh
-      - uses: docker/build-push-action@v6
-        if: steps.prepare.outputs.ready == 'true'
-        with:
-          context: .
-          file: packaging/appimage/arm64.Dockerfile
-          platforms: linux/arm64
-          outputs: type=local,dest=dist
-          cache-from: type=gha,scope=appimage-arm64
-          cache-to: type=gha,mode=max,scope=appimage-arm64
       - name: Build and check distribution packages
         if: steps.prepare.outputs.ready == 'true'
         run: |
@@ -64,13 +49,13 @@ jobs:
         run: |
           sh packaging/flatpak/publish.sh
           sh packaging/flatpak/check.sh
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         if: steps.prepare.outputs.ready == 'true'
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         if: steps.prepare.outputs.ready == 'true'
         with:
           path: flatpak-repo
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: pages
         if: steps.prepare.outputs.ready == 'true'
       - name: Verify the deployed update repository

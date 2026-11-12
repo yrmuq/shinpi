@@ -2,7 +2,7 @@
 set -eu
 ARCH=${1:?architecture required}
 CHANNEL=${2:?channel required}
-case "$ARCH" in x86_64|aarch64) ;; *) exit 1 ;; esac
+case "$ARCH" in x86_64) ;; *) exit 1 ;; esac
 case "$CHANNEL" in stable|test|prerelease) ;; *) exit 1 ;; esac
 # Vendoring keeps the SDK build offline and tied to Cargo.lock.
 mkdir -p cargo dist
