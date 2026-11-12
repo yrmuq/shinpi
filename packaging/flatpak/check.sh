@@ -7,7 +7,7 @@ if ! flatpak info --user io.github.yrmuq.shinpi >/dev/null 2>&1; then
 fi
 flatpak update --user --noninteractive io.github.yrmuq.shinpi
 flatpak run io.github.yrmuq.shinpi --help
-flatpak run io.github.yrmuq.shinpi --once | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d["devices"],list) and isinstance(d["warnings"],list)'
+flatpak run io.github.yrmuq.shinpi --once | target/debug/shinpi-tools check-readings
 flatpak run io.github.yrmuq.shinpi --print-udev-rules | cmp - packaging/70-shinpi.rules
 if [ -f "$RUNNER_TEMP/previous-settings.json" ]; then
     cmp "$RUNNER_TEMP/previous-settings.json" "$HOME/.var/app/io.github.yrmuq.shinpi/config/shinpi/config.json"

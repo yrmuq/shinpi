@@ -23,6 +23,9 @@ runs:
           shinpi-${{ inputs.cache }}-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
           shinpi-${{ inputs.cache }}-v2-${{ runner.os }}-${{ runner.arch }}-
           shinpi-${{ inputs.cache }}-${{ runner.os }}-${{ runner.arch }}-
+    - name: Build distribution tools
+      shell: bash
+      run: cargo build --locked --package shinpi-tools
     - name: Libraries
       shell: bash
       run: |

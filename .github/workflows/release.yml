@@ -25,13 +25,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Prepare release from a dev merge
-        id: prepare
-        run: python3 packaging/release/flow.py prepare release
       - uses: ./.github/actions/setup
-        if: steps.prepare.outputs.ready == 'true'
         with:
           cache: appimage
+      - name: Prepare release from a dev merge
+        id: prepare
+        run: target/debug/shinpi-tools prepare release
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh
@@ -71,9 +70,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
-        run: python3 packaging/release/flow.py publish release "$VERSION"
+        run: target/debug/shinpi-tools publish release "$VERSION"
       - name: Sync released version into dev and rebuild draft
         if: steps.prepare.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 packaging/release/flow.py sync-dev
+        run: target/debug/shinpi-tools sync-dev
