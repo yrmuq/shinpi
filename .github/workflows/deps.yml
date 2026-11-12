@@ -26,12 +26,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          cache: appimage
+      - uses: ./.github/actions/tools
       - name: Accumulate dependency updates and prepare prerelease
         id: prepare
-        run: target/debug/shinpi-tools prepare deps
+        run: '"$SHINPI_TOOLS" prepare deps'
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+          flatpak: prerelease
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh

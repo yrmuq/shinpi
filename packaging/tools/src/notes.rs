@@ -5,12 +5,15 @@ use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn commits(subjects: &str) -> String {
-    let sections = ["Added", "Changed", "Fixed", "Removed", "Security"];
+    let sections = ["Added", "Changed", "Fixed", "Removed"];
     let mut buckets = vec![Vec::new(); sections.len()];
+    let mut seen = BTreeSet::new();
     for subject in subjects.lines().map(str::trim) {
         let lower = subject.to_lowercase();
         if lower.starts_with("merge ")
             || lower.starts_with("version ")
+            || lower == "initial commit"
+            || subject.is_empty()
             || ["chmod ", "./shinpi", "Test build"]
                 .iter()
                 .any(|part| subject.contains(part))
@@ -21,17 +24,31 @@ pub fn commits(subjects: &str) -> String {
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .next()
             .unwrap_or("");
-        let section = match word {
-            "add" | "implement" => 0,
-            "fix" | "resolve" | "prevent" => 2,
-            "remove" => 3,
-            "redact" | "restrict" => 4,
-            _ => 1,
+        let (section, verb) = match word {
+            "add" => (0, "Added"),
+            "implement" => (0, "Implemented"),
+            "fix" => (2, "Fixed"),
+            "resolve" => (2, "Resolved"),
+            "prevent" => (2, "Prevented"),
+            "remove" => (3, "Removed"),
+            "redact" => (2, "Redacted"),
+            "restrict" => (1, "Restricted"),
+            "update" => (1, "Updated"),
+            "replace" => (1, "Replaced"),
+            "keep" => (1, "Kept"),
+            "preserve" => (1, "Preserved"),
+            "improve" => (1, "Improved"),
+            _ => (1, ""),
         };
-        buckets[section].push(format!(
-            "- {subject}{}\n",
-            if subject.ends_with('.') { "" } else { "." }
-        ));
+        let text = if verb.is_empty() {
+            subject.to_owned()
+        } else {
+            format!("{verb}{}", &subject[word.len()..])
+        };
+        let text = format!("{text}{}", if text.ends_with('.') { "" } else { "." });
+        if seen.insert(text.to_lowercase()) {
+            buckets[section].push(format!("- {text}\n"));
+        }
     }
     sections
         .iter()
@@ -158,9 +175,9 @@ mod tests {
     fn notes_retain_sections_and_dependency_versions() {
         let body =
             commits("Add history\nFix focus\nRemove duplicate\nVersion 0.1.1\nMerge branch 'dev'");
-        assert!(body.contains("### Added\n- Add history."));
-        assert!(body.contains("### Fixed\n- Fix focus."));
-        assert!(body.contains("### Removed\n- Remove duplicate."));
+        assert!(body.contains("### Added\n- Added history."));
+        assert!(body.contains("### Fixed\n- Fixed focus."));
+        assert!(body.contains("### Removed\n- Removed duplicate."));
         assert!(!body.contains("Version"));
         let diff = "diff --git a/Cargo.lock b/Cargo.lock\n [[package]]\n name = \"example\"\n-version = \"1.0.0\"\n+version = \"2.0.0\"\ndiff --git a/a.yml b/a.yml\n-uses: actions/checkout@v4\n+uses: actions/checkout@v5\ndiff --git a/packaging/appimage/build.sh b/packaging/appimage/build.sh\n-TOOL_URL=\"https://github.com/AppImage/appimagetool/releases/download/1.0/appimagetool-x86_64.AppImage\"\n+TOOL_URL=\"https://github.com/AppImage/appimagetool/releases/download/2.0/appimagetool-x86_64.AppImage\"\n";
         let body = deps(diff);

@@ -12,6 +12,7 @@ fi
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install --user --noninteractive --arch="$ARCH" flathub \
     org.freedesktop.Sdk//25.08 org.freedesktop.Platform//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
+flatpak update --user --noninteractive org.freedesktop.Sdk//25.08 org.freedesktop.Platform//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
 SIGN=
 if [ "$CHANNEL" != test ]; then
     test -n "${FLATPAK_GPG_ID:-}"

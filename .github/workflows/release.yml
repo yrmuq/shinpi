@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: stable-release
+  group: dependency-prerelease
   cancel-in-progress: false
 
 jobs:
@@ -25,12 +25,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          cache: appimage
+      - uses: ./.github/actions/tools
       - name: Prepare release from a dev merge
         id: prepare
-        run: target/debug/shinpi-tools prepare release
+        run: '"$SHINPI_TOOLS" prepare release'
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+          flatpak: stable
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh
@@ -76,3 +79,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: target/debug/shinpi-tools sync-dev
+      - name: Bring deps forward without adopting its pending updates
+        if: ${{ !cancelled() && steps.prepare.outcome != 'skipped' }}
+        run: '"$SHINPI_TOOLS" sync-deps'

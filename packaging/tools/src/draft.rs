@@ -4,6 +4,45 @@
 use crate::{string, Context, Result};
 use serde_json::{json, Value};
 
+pub fn needed(context: &Context) -> Result<()> {
+    let repo = std::env::var("GITHUB_REPOSITORY")?;
+    let sha = std::env::var("GITHUB_SHA")?;
+    let target = if std::env::var("INCLUDE_FLATPAK").as_deref() == Ok("true") {
+        "appimage-flatpak"
+    } else {
+        "appimage"
+    };
+    let mut built = false;
+    for page in 1.. {
+        let runs = context.api(&format!("repos/{repo}/actions/workflows/dev.yml/runs?head_sha={sha}&status=success&per_page=100&page={page}"), "GET", None)?;
+        let runs = runs["workflow_runs"]
+            .as_array()
+            .ok_or("Expected workflow runs")?;
+        built |= runs.iter().any(|run| {
+            run["head_sha"] == sha
+                && run["conclusion"] == "success"
+                && run["display_title"]
+                    .as_str()
+                    .is_some_and(|title| title.ends_with(&format!(" / {target}")))
+        });
+        if built || runs.len() < 100 {
+            break;
+        }
+    }
+    if let Some(path) = std::env::var_os("GITHUB_OUTPUT") {
+        use std::io::Write;
+        writeln!(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?,
+            "needed={}",
+            !built
+        )?;
+    }
+    Ok(())
+}
+
 pub fn update(context: &Context) -> Result<()> {
     let repo = std::env::var("GITHUB_REPOSITORY")?;
     let commit = std::env::var("GITHUB_SHA")?;

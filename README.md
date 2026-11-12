@@ -14,6 +14,8 @@
 
 `shinpi` is a Linux tray application for checking device battery levels in one place. Built with Rust, Slint and FemtoVG, it provides native windows styled for KDE Plasma without a browser engine.
 
+![shinpi notification and battery settings](assets/screenshot.png)
+
 ---
 
 ## Features
@@ -67,17 +69,19 @@ The empty panel's `Add` button disappears after selecting a device; further devi
 
 Stable releases use `X.Y.0`. Versions with a non-zero final component, such as `X.Y.1`, are automatic dependency-update prereleases.
 
-The current stable release is [shinpi 0.2.0](https://github.com/yrmuq/shinpi/releases/tag/v0.2.0). Development builds remain in the `dev` draft and are not the stable update source.
+Download the [latest stable release](https://github.com/yrmuq/shinpi/releases/latest), or browse [all releases](https://github.com/yrmuq/shinpi/releases). Development builds remain in the `dev` draft and are not the stable update source.
 
 ### AppImage
 
-Requires `x86_64` Linux, working graphics drivers, a system D-Bus and a StatusNotifier-compatible tray. KDE Plasma is the primary desktop environment.
+Requires `x86_64` Linux with `glibc` 2.39 or newer, working graphics drivers, a system D-Bus and a StatusNotifier-compatible tray. KDE Plasma is the primary desktop environment.
 
-Download `shinpi-x86_64.AppImage` from the stable release. Use [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever) to install and integrate it with the desktop. The AppImage embeds a stable GitHub Releases update source. Its matching `.zsync` supports efficient updates through Gear Lever; import the AppImage itself, not the `.zsync`.
+Download `shinpi-x86_64.AppImage` from the [latest stable release](https://github.com/yrmuq/shinpi/releases/latest). Use [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever) to install and integrate it with the desktop. The AppImage embeds a stable GitHub Releases update source. Its matching `.zsync` supports efficient updates through Gear Lever; import the AppImage itself, not the `.zsync`.
 
 ### Flatpak
 
 Install the `x86_64` stable branch with `shinpi.flatpakref` from the stable release. It uses the signed repository at [yrmuq.github.io/shinpi](https://yrmuq.github.io/shinpi/). `arm64` packages are not built. A development test bundle does not replace this repository.
+
+Packages are distributed through GitHub Releases; `shinpi` is not listed on Flathub. Open `shinpi.flatpakref` in your software manager to install it. Subsequent updates use `flatpak update` or a compatible desktop software manager. [Warehouse](https://flathub.org/apps/io.github.flattool.Warehouse) can manage installed Flatpak applications. The standalone `.flatpak` bundle is an additional installation option; prefer `.flatpakref` to configure the signed update remote.
 
 ### HID Access
 

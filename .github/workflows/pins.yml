@@ -2,7 +2,7 @@ name: Pins
 
 on:
   schedule:
-    - cron: "0 9 28 * *"
+    - cron: "0 9 * * 5"
   workflow_dispatch:
 
 permissions:
@@ -21,12 +21,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          cache: appimage
+      - uses: ./.github/actions/tools
       - name: Update appimagetool and prepare prerelease
         id: prepare
-        run: target/debug/shinpi-tools prepare pins
+        run: '"$SHINPI_TOOLS" prepare pins'
+      - uses: ./.github/actions/setup
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          cache: appimage
+          flatpak: prerelease
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh

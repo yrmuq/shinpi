@@ -17,13 +17,14 @@
 - `.github/workflows/check.yml` — форматирование, Clippy, тесты и проверка CLI на `dev`.
 - `.github/workflows/dev.yml` — автоматическая проверка каждого push в `dev`, x86_64 AppImage, zsync и контрольные суммы, разовый x86_64 Flatpak в черновике `shinpi dev`.
 - `.github/workflows/release.yml` — обычный релиз после merge `dev` в `main` и возврат версии в `dev`.
-- `.github/dependabot.yml`, `.github/workflows/deps.yml`, `.github/workflows/pins.yml` — ежемесячные обновления Cargo/Actions/appimagetool и сборка/публикация prerelease на `deps`.
+- `.github/dependabot.yml`, `.github/workflows/deps.yml`, `.github/workflows/pins.yml` — еженедельные обновления Cargo/Actions/appimagetool и сборка/публикация prerelease на `deps`.
 - `.github/actions/setup/`, `packaging/check.sh` — общие библиотеки, Rust, кеш и проверки для CI.
-- `packaging/tools/src/flow.rs`, `notes.rs`, `pins.rs` — служебная утилита Rust: подготовка версий и описаний, публикация CI-релизов, синхронизация `dev` и обновление `appimagetool`.
+- `.github/actions/tools/` — отдельная сборка служебной утилиты до подготовки версии; кеш приложения выбирается после подготовки итогового lockfile.
+- `packaging/tools/src/flow.rs`, `notes.rs`, `pins.rs` — служебная утилита Rust: подготовка версий и описаний, публикация CI-релизов, синхронизация `dev`/`deps`, блокировка релиза с непроверенными зависимостями и обновление `appimagetool`.
 - `packaging/tools/src/draft.rs`, `checks.rs` — обновление черновика, проверка JSON показаний и zsync, создание `flatpakref`; не включаются в приложение.
 - `packaging/appimage/` — сборка x86_64 AppImage, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
 - `packaging/tools/tests/` — релиз и синхронизация веток на временных Git-репозиториях, защита публикации и черновика, контрольные суммы и закреплённые инструменты.
-- `assets/icon.svg` — горизонтальный зелёный значок приложения для окон, AppImage и README.
+- `assets/icon.svg`, `assets/screenshot.png` — значок приложения и настоящий скриншот настроек для README.
 
 - `packaging/flatpak/` — сборка x86_64 в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.
 - `packaging/release/build.sh` — полная сборка x86_64 AppImage и Flatpak.

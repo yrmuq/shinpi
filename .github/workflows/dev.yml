@@ -1,4 +1,5 @@
 name: Development build
+run-name: Development ${{ github.sha }} / ${{ inputs.include_flatpak && 'appimage-flatpak' || 'appimage' }}
 
 on:
   workflow_dispatch:
@@ -12,26 +13,42 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   appimage:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.include_flatpak && 90 || 30 }}
+    outputs:
+      needed: ${{ steps.plan.outputs.needed }}
     concurrency:
       group: development-build
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/tools
+      - name: Skip a successful build of the same commit and formats
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCLUDE_FLATPAK: ${{ inputs.include_flatpak }}
+        run: '"$SHINPI_TOOLS" dev-needed'
       - uses: ./.github/actions/setup
+        if: steps.plan.outputs.needed == 'true'
         with:
           cache: appimage
-      - run: sh packaging/check.sh
-      - run: sh packaging/appimage/build.sh
-      - run: sh packaging/appimage/check.sh
-      - if: inputs.include_flatpak == true
+          flatpak: ${{ inputs.include_flatpak && 'test' || '' }}
+      - if: steps.plan.outputs.needed == 'true'
+        run: sh packaging/check.sh
+      - if: steps.plan.outputs.needed == 'true'
+        run: sh packaging/appimage/build.sh
+      - if: steps.plan.outputs.needed == 'true'
+        run: sh packaging/appimage/check.sh
+      - if: steps.plan.outputs.needed == 'true' && inputs.include_flatpak == true
         run: sh packaging/flatpak/build.sh x86_64 test
       - uses: actions/upload-artifact@v7
+        if: steps.plan.outputs.needed == 'true'
         with:
           name: development-appimage
           path: |
@@ -44,6 +61,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
   publish:
+    if: needs.appimage.outputs.needed == 'true'
     needs: appimage
     runs-on: ubuntu-24.04
     timeout-minutes: 10
