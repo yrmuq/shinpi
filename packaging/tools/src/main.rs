@@ -16,6 +16,8 @@ fn run() -> Result<()> {
         ["publish", mode, version] => flow::publish(&context, mode, version, ""),
         ["publish", mode, version, old_deps] => flow::publish(&context, mode, version, old_deps),
         ["sync-dev"] => flow::sync_dev(&context),
+        ["sync-deps"] => flow::sync_deps(&context),
+        ["dev-needed"] => draft::needed(&context),
         ["draft"] => draft::update(&context),
         ["pin-tool"] => { pins::update(&context)?; Ok(()) },
         ["check-zsync", path] => checks::zsync(&context, Path::new(path)),

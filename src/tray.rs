@@ -7,6 +7,8 @@ pub enum Command {
     Refresh,
     Settings,
     Quit,
+    CheckUpdate,
+    OpenLink(i32),
     Add,
     Select(usize),
     Edit(usize),

@@ -4,6 +4,9 @@ inputs:
   cache:
     description: Cache namespace
     required: true
+  flatpak:
+    description: Optional Flatpak cache channel
+    default: ''
 runs:
   using: composite
   steps:
@@ -26,6 +29,16 @@ runs:
     - name: Build distribution tools
       shell: bash
       run: cargo build --locked --package shinpi-tools
+    - uses: actions/cache@v6
+      if: inputs.flatpak != ''
+      with:
+        path: |
+          ~/.local/share/flatpak
+          ~/.cache/flatpak
+          .flatpak-builder
+        key: shinpi-flatpak-${{ inputs.flatpak }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', 'packaging/flatpak/*.json') }}
+        restore-keys: |
+          shinpi-flatpak-${{ inputs.flatpak }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
     - name: Libraries
       shell: bash
       run: |

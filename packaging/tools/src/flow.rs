@@ -65,6 +65,71 @@ fn ancestor(context: &Context, first: &str, second: &str) -> Result<bool> {
     context.succeeds("git", &["merge-base", "--is-ancestor", first, second])
 }
 
+fn fetch_deps(context: &Context) -> Result<String> {
+    let remote = context.git(&["ls-remote", "origin", "refs/heads/deps"])?;
+    let sha = remote.split_whitespace().next().unwrap_or("").to_owned();
+    if !sha.is_empty() {
+        context.git(&[
+            "fetch",
+            "origin",
+            "refs/heads/deps:refs/remotes/origin/deps",
+        ])?;
+    }
+    Ok(sha)
+}
+
+fn merge_main(context: &Context) -> Result<()> {
+    if ancestor(context, "origin/main", "HEAD")? {
+        return Ok(());
+    }
+    if ancestor(context, "HEAD", "origin/main")? {
+        context.git(&["merge", "--ff-only", "origin/main"])?;
+        return Ok(());
+    }
+    let manifest: toml::Value = toml::from_str(&context.git(&["show", "origin/main:Cargo.toml"])?)?;
+    let value = manifest["package"]["version"]
+        .as_str()
+        .ok_or("Missing main version")?;
+    // Normalize only the application version; preserve dependency edits in both files.
+    bump(context, value)?;
+    context.git(&["add", "Cargo.toml", "Cargo.lock"])?;
+    if !context.succeeds("git", &["diff", "--cached", "--quiet"])? {
+        context.git(&["commit", "-m", "Keep the main application version on deps"])?;
+    }
+    if let Err(error) = context.git(&[
+        "merge",
+        "--no-ff",
+        "origin/main",
+        "-m",
+        "Merge main into deps",
+    ]) {
+        context.git(&["merge", "--abort"])?;
+        return Err(format!("Dependency synchronization stopped on a conflict: {error}").into());
+    }
+    Ok(())
+}
+
+pub fn sync_deps(context: &Context) -> Result<()> {
+    context.git(&[
+        "fetch",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+    ])?;
+    let previous = fetch_deps(context)?;
+    context.git(&[
+        "checkout",
+        "--detach",
+        if previous.is_empty() {
+            "origin/main"
+        } else {
+            &previous
+        },
+    ])?;
+    merge_main(context)?;
+    context.git(&["push", "origin", "HEAD:refs/heads/deps"])?;
+    Ok(())
+}
+
 pub fn prepare(context: &Context, mode: &str) -> Result<()> {
     if !["release", "deps", "pins"].contains(&mode) {
         return Err("Unknown release mode".into());
@@ -92,6 +157,9 @@ pub fn prepare(context: &Context, mode: &str) -> Result<()> {
         {
             return output(&[("ready", "false")]);
         }
+        if !fetch_deps(context)?.is_empty() && !ancestor(context, "origin/deps", "origin/dev")? {
+            return Err("Release blocked: merge deps into dev and test those updates first".into());
+        }
         let [major, minor, _] = version(context)?;
         let stable = context.git(&[
             "tag",
@@ -116,21 +184,14 @@ pub fn prepare(context: &Context, mode: &str) -> Result<()> {
         )
     } else {
         let candidate = context.git(&["rev-parse", "HEAD"])?;
-        let remote = context.git(&["ls-remote", "origin", "refs/heads/deps"])?;
-        if let Some(sha) = remote.split_whitespace().next() {
-            old_deps = sha.to_owned();
-            context.git(&[
-                "fetch",
-                "origin",
-                "refs/heads/deps:refs/remotes/origin/deps",
-            ])?;
-        }
-        let base = if !old_deps.is_empty() && ancestor(context, "origin/main", &old_deps)? {
-            old_deps.as_str()
-        } else {
+        old_deps = fetch_deps(context)?;
+        let base = if old_deps.is_empty() {
             "origin/main"
+        } else {
+            old_deps.as_str()
         };
         context.git(&["checkout", "--detach", base])?;
+        merge_main(context)?;
         if mode == "deps" {
             context.git(&[
                 "merge",
@@ -221,7 +282,7 @@ pub fn publish(context: &Context, mode: &str, value: &str, old_deps: &str) -> Re
             &tag_ref,
         ])?;
     } else {
-        // Only deps may be replaced when a stable release supersedes its base.
+        // The lease rejects concurrent writers; the prepared history retains old deps.
         context.git(&[
             "push",
             "--atomic",

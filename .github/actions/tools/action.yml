@@ -1,0 +1,21 @@
+name: Distribution tools
+description: Bootstrap release preparation before restoring application build caches.
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      id: rust
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ runner.temp }}/shinpi-tools
+        key: shinpi-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', 'packaging/tools/Cargo.toml', 'packaging/tools/src/*.rs') }}
+        restore-keys: |
+          shinpi-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
+    - name: Build preparation tools
+      shell: bash
+      run: |
+        cargo build --locked --package shinpi-tools --target-dir "$RUNNER_TEMP/shinpi-tools"
+        echo "SHINPI_TOOLS=$RUNNER_TEMP/shinpi-tools/debug/shinpi-tools" >> "$GITHUB_ENV"

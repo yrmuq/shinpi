@@ -48,9 +48,7 @@ impl Catalog {
         let mut rows = parse(ENGLISH);
         for (id, translated) in parse(&source(folder, &language)) {
             if let Some(row) = rows.get_mut(&id) {
-                if row.en == translated.en
-                    && row.en.matches("{}").count() == translated.text.matches("{}").count()
-                {
+                if row.en == translated.en && compatible(&row.en, &translated.text) {
                     row.text = translated.text;
                 }
             }
@@ -67,17 +65,9 @@ impl Catalog {
     }
 
     pub fn trf(&self, original: &str, args: &[&str]) -> String {
-        let pattern = self.tr(original);
-        let mut parts = pattern.split("{}");
-        if pattern.matches("{}").count() != args.len() {
-            return original.into();
-        }
-        let mut text = parts.next().unwrap_or("").to_string();
-        for (arg, rest) in args.iter().zip(parts) {
-            text.push_str(arg);
-            text.push_str(rest);
-        }
-        text
+        render(&self.tr(original), args)
+            .or_else(|| render(original, args))
+            .unwrap_or_else(|| original.into())
     }
 
     pub fn labels(&self) -> Vec<slint::SharedString> {
@@ -139,6 +129,47 @@ impl Catalog {
         }
         text.into()
     }
+}
+
+fn placeholders(pattern: &str) -> Option<Vec<std::ops::Range<usize>>> {
+    let mut fields = Vec::new();
+    let mut chars = pattern.char_indices();
+    while let Some((start, ch)) = chars.next() {
+        match ch {
+            '{' => match chars.next()? {
+                (end, '}') => fields.push(start..end + 1),
+                (_, '{') => {}
+                _ => return None,
+            },
+            '}' if chars.next()?.1 != '}' => return None,
+            _ => {}
+        }
+    }
+    Some(fields)
+}
+
+fn compatible(original: &str, translated: &str) -> bool {
+    match (placeholders(original), placeholders(translated)) {
+        (Some(original), Some(translated)) => original.len() == translated.len(),
+        _ => false,
+    }
+}
+
+fn render(pattern: &str, args: &[&str]) -> Option<String> {
+    let fields = placeholders(pattern)?;
+    if fields.len() != args.len() {
+        return None;
+    }
+    let literal = |text: &str| text.replace("{{", "{").replace("}}", "}");
+    let mut out = String::new();
+    let mut previous = 0;
+    for (field, arg) in fields.iter().zip(args) {
+        out.push_str(&literal(&pattern[previous..field.start]));
+        out.push_str(arg);
+        previous = field.end;
+    }
+    out.push_str(&literal(&pattern[previous..]));
+    Some(out)
 }
 
 fn parse(text: &str) -> BTreeMap<u32, Row> {
@@ -254,6 +285,17 @@ fn language_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn translations_reject_invalid_fields_and_keep_literal_braces() {
+        for text in ["{} {name}", "{} {0}", "{} {:.2}", "{} {", "{} }"] {
+            assert!(!compatible("Value: {}", text), "{text}");
+        }
+        assert!(compatible("Value: {}", "Значение: {{{}}}"));
+        assert_eq!(
+            render("Значение: {{{}}}", &["Mouse {}"]),
+            Some("Значение: {Mouse {}}".into())
+        );
+    }
     #[test]
     fn locale_fallback_placeholders_and_canonical_readings_stay_safe() {
         let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("languages");

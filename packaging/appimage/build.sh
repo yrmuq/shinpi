@@ -41,6 +41,8 @@ cp "$ROOT"/languages/*.ini "$APPDIR/usr/share/shinpi/languages/"
 cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/README.md" "$PACK/BUNDLED.txt" \
     "$ROOT/ui/icons/COPYING" "$ROOT/packaging/70-shinpi.rules" \
     "$APPDIR/usr/share/doc/shinpi/"
+mkdir -p "$APPDIR/usr/share/doc/shinpi/assets"
+cp "$ROOT/assets/icon.svg" "$ROOT/assets/screenshot.png" "$APPDIR/usr/share/doc/shinpi/assets/"
 
 # Graphics and display transports stay on the host with its GPU driver.
 ldd "$BIN" | awk '/=>/ { print $3 }' | while read -r lib; do

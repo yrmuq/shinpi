@@ -250,7 +250,7 @@ mod tests {
         assert!(v9_reading(&[0x55, 0x65, 101, 2]).is_none());
         assert_eq!(
             v9_reading(&[0x55, 0x65, 90, 2]).unwrap().unwrap().text(),
-            "≈90%"
+            "90%"
         );
         assert_eq!(
             v9_reading(&[0x55, 0x65, 50, 3]).unwrap().unwrap().text(),

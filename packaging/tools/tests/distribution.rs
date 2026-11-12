@@ -47,6 +47,7 @@ impl Fixture {
         );
         fixture.write("releases.json", "[]");
         fixture.write("assets.json", "[]");
+        fixture.write("runs.json", r#"{"workflow_runs":[]}"#);
         fixture.write(
             "release.json",
             r#"{"id":7,"html_url":"https://github.com/owner/repo/releases/7"}"#,
@@ -173,6 +174,7 @@ case "$1" in
         case "$*" in
             *'--input -'*) cat > "$STUB_DIR/payload.json"; cat "$STUB_DIR/release.json" ;;
             *'--method DELETE'*) ;;
+            *'/actions/workflows/dev.yml/runs?'*) cat "$STUB_DIR/runs.json" ;;
             *'/git/ref/heads/dev'*) cat "$STUB_DIR/ref.json" ;;
             *'/assets '*) cat "$STUB_DIR/assets.json" ;;
             *'/releases?'*) cat "$STUB_DIR/releases.json" ;;
@@ -208,7 +210,7 @@ fn stable_release_requires_merge_and_syncs_version_back_to_dev() {
     assert!(fixture.read("output").contains("version=0.2.0"));
     assert!(fixture
         .read("notes.md")
-        .contains("### Fixed\n- Fix device selection."));
+        .contains("### Fixed\n- Fixed device selection."));
     fixture.run(&["publish", "release", "0.2.0"]);
     let released = fixture.git(&["rev-parse", "HEAD"]);
     fixture.run(&["sync-dev"]);
@@ -317,6 +319,155 @@ fn dependencies_accumulate_preserve_main_dev_and_reject_concurrent_publication()
             .unwrap(),
         concurrent
     );
+}
+
+fn pending_dependency(fixture: &Fixture) -> String {
+    fixture.git(&["checkout", "-b", "deps"]);
+    fixture.write(
+        "Cargo.toml",
+        &fixture
+            .read("Cargo.toml")
+            .replace("example = \"1\"", "example = \"2\""),
+    );
+    fixture.write(
+        "Cargo.lock",
+        &fixture
+            .read("Cargo.lock")
+            .replace("version = \"1.0.0\"", "version = \"2.0.0\""),
+    );
+    fixture.commit("Update example");
+    fixture.git(&["push", "origin", "deps"]);
+    let sha = fixture.git(&["rev-parse", "HEAD"]);
+    fixture.git(&["checkout", "main"]);
+    sha
+}
+
+#[test]
+fn release_is_blocked_until_pending_dependencies_are_tested_on_dev() {
+    let fixture = Fixture::repository();
+    pending_dependency(&fixture);
+    fixture.git(&["merge", "--no-ff", "dev", "-m", "Merge branch 'dev'"]);
+    fixture.git(&["push", "origin", "main"]);
+    fixture.fails(&["prepare", "release"], "Release blocked");
+    assert!(fixture.read("Cargo.toml").contains("version = \"0.1.0\""));
+    assert_eq!(fixture.git(&["tag", "--list"]), "");
+    fixture.git(&["checkout", "dev"]);
+    fixture.git(&[
+        "merge",
+        "--no-ff",
+        "deps",
+        "-m",
+        "Merge dependency updates into dev",
+    ]);
+    fixture.git(&["push", "origin", "dev"]);
+    fixture.git(&["checkout", "main"]);
+    fixture.git(&["merge", "--no-ff", "dev", "-m", "Merge branch 'dev'"]);
+    fixture.git(&["push", "origin", "main"]);
+    fixture.run(&["prepare", "release"]);
+    assert!(fixture.read("output").contains("ready=true"));
+}
+
+#[test]
+fn deps_sync_initializes_a_missing_branch_from_main() {
+    let fixture = Fixture::repository();
+    let main = fixture.git(&["rev-parse", "origin/main"]);
+    fixture.run(&["sync-deps"]);
+    assert_eq!(
+        fixture
+            .git(&["ls-remote", "origin", "refs/heads/deps"])
+            .split_whitespace()
+            .next()
+            .unwrap(),
+        main
+    );
+}
+
+#[test]
+fn deps_sync_preserves_pending_updates_and_takes_main_application_version() {
+    let fixture = Fixture::repository();
+    let pending = pending_dependency(&fixture);
+    let context = Context {
+        root: fixture.root.clone(),
+    };
+    flow::bump(&context, "0.2.0").unwrap();
+    fixture.commit("Version 0.2.0");
+    fixture.git(&["push", "origin", "main"]);
+    let main = fixture.git(&["rev-parse", "HEAD"]);
+    fixture.run(&["sync-deps"]);
+    fixture.git(&["merge-base", "--is-ancestor", &pending, "HEAD"]);
+    fixture.git(&["merge-base", "--is-ancestor", &main, "HEAD"]);
+    assert_eq!(flow::version(&context).unwrap(), [0, 2, 0]);
+    assert!(fixture.read("Cargo.toml").contains("example = \"2\""));
+    assert!(fixture
+        .read("Cargo.lock")
+        .contains("name = \"example\"\nversion = \"2.0.0\""));
+    assert_eq!(
+        fixture
+            .git(&["ls-remote", "origin", "refs/heads/deps"])
+            .split_whitespace()
+            .next()
+            .unwrap(),
+        fixture.git(&["rev-parse", "HEAD"])
+    );
+}
+
+#[test]
+fn deps_sync_stops_on_non_version_conflicts_without_overwriting_remote() {
+    let fixture = Fixture::repository();
+    pending_dependency(&fixture);
+    fixture.git(&["checkout", "deps"]);
+    fixture.write(".github/workflows/test.yml", "uses: actions/checkout@v5\n");
+    fixture.commit("Update pending action");
+    fixture.git(&["push", "origin", "deps"]);
+    let pending = fixture.git(&["rev-parse", "HEAD"]);
+    fixture.git(&["checkout", "main"]);
+    fixture.write(".github/workflows/test.yml", "uses: actions/checkout@v6\n");
+    fixture.commit("Update main action");
+    fixture.git(&["push", "origin", "main"]);
+    fixture.fails(&["sync-deps"], "stopped on a conflict");
+    assert_eq!(
+        fixture
+            .git(&["ls-remote", "origin", "refs/heads/deps"])
+            .split_whitespace()
+            .next()
+            .unwrap(),
+        pending
+    );
+    assert_eq!(fixture.git(&["diff", "--name-only", "--diff-filter=U"]), "");
+}
+
+#[test]
+fn new_dependency_update_retains_pending_changes_after_main_advances() {
+    let fixture = Fixture::repository();
+    let pending = pending_dependency(&fixture);
+    fixture.write(".github/main.txt", "main advanced");
+    fixture.commit("Fix main");
+    fixture.git(&["push", "origin", "main"]);
+    fixture.git(&["checkout", "--detach", "main"]);
+    fixture.write(".github/workflows/test.yml", "uses: actions/checkout@v5\n");
+    fixture.commit("Update action");
+    fixture.run(&["prepare", "deps"]);
+    fixture.git(&["merge-base", "--is-ancestor", &pending, "HEAD"]);
+    assert!(fixture.read("Cargo.toml").contains("example = \"2\""));
+    assert!(fixture.read(".github/workflows/test.yml").contains("@v5"));
+}
+
+#[test]
+fn successful_dev_build_deduplication_distinguishes_selected_formats() {
+    let fixture = Fixture::new();
+    fixture.write("runs.json", &json!({"workflow_runs":[{"head_sha":"a".repeat(40),"conclusion":"success","display_title":"Development / appimage"}]}).to_string());
+    fixture.run(&["dev-needed"]);
+    assert_eq!(fixture.read("output"), "needed=false\n");
+    let output = fixture
+        .command(&["dev-needed"])
+        .env("INCLUDE_FLATPAK", "true")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(fixture.read("output").ends_with("needed=true\n"));
+    fixture.write("runs.json", &json!({"workflow_runs":[{"head_sha":"b".repeat(40),"conclusion":"success","display_title":"Development / appimage"}]}).to_string());
+    fixture.run(&["dev-needed"]);
+    assert!(fixture.read("output").ends_with("needed=true\n"));
 }
 
 #[test]
