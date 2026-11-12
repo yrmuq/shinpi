@@ -26,6 +26,7 @@ test('popup stays beside all panel edges and inside the selected output', () => 
         assert.ok(clamped.y >= area.y + 8 && clamped.y + size.height <= area.y + area.height - 8);
     }
     assert.equal(context.snap(10, 1.25), 10.4);
+    assert.equal(context.isPopup({ caption: 'shinpi-devices', resourceClass: 'shinpi-popup' }), true);
     assert.equal(context.isPopup({ caption: 'shinpi-devices', resourceClass: 'another-app' }), false);
 });
 
