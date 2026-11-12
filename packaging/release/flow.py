@@ -140,8 +140,8 @@ def publish(mode, value, old_deps=""):
             "HEAD:refs/heads/deps", f"refs/tags/{tag}")
     else:
         raise ValueError("Unknown release mode")
-    command = ["gh", "release", "create", tag, "dist/shinpi-x86_64.AppImage",
-               "dist/shinpi-x86_64.AppImage.sha256", "--repo", os.environ["GITHUB_REPOSITORY"],
+    command = ["gh", "release", "create", tag,
+               *(str(path) for path in sorted((ROOT / "dist").glob("*")) if path.is_file()), "--repo", os.environ["GITHUB_REPOSITORY"],
                "--verify-tag", "--title", f"shinpi {value}", "--notes-file", "notes.md"]
     command += ["--latest"] if mode == "release" else ["--prerelease", "--latest=false"]
     run(*command)

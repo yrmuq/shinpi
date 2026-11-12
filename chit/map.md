@@ -15,11 +15,14 @@
 - `packaging/` — desktop entry и правила `udev` для поддерживаемых HID.
 - `tests/placement.mjs` — размещение у четырёх сторон панели и границ экрана.
 - `.github/workflows/check.yml` — форматирование, Clippy, тесты и проверка CLI на `dev`.
-- `.github/workflows/dev.yml` — автоматическая проверка каждого push в `dev`, AppImage и контрольная сумма в черновике `shinpi dev`.
+- `.github/workflows/dev.yml` — автоматическая проверка каждого push в `dev`, x86_64 AppImage, zsync и контрольные суммы, разовый x86_64 Flatpak в черновике `shinpi dev`.
 - `.github/workflows/release.yml` — обычный релиз после merge `dev` в `main` и возврат версии в `dev`.
 - `.github/dependabot.yml`, `.github/workflows/deps.yml`, `.github/workflows/pins.yml` — ежемесячные обновления Cargo/Actions/appimagetool и сборка/публикация prerelease на `deps`.
 - `.github/actions/setup/`, `packaging/check.sh` — общие библиотеки, Rust, кеш и проверки для CI.
 - `packaging/release/` — подготовка версий, описаний, публикация CI-релизов и синхронизация `dev`.
-- `packaging/appimage/` — сборка AppImage, запуск и обновление черновика через GitHub Actions без создания Git-тега.
+- `packaging/appimage/` — сборка AppImage обеих архитектур, проверка zsync, запуск и обновление черновика через GitHub Actions без создания Git-тега.
 - `tests/test_release.py` — релиз, накопление обновлений и защита от конкурентной перезаписи на временных Git-репозиториях.
 - `assets/icon.svg` — горизонтальный зелёный значок приложения для окон, AppImage и README.
+
+- `packaging/flatpak/` — сборка обеих архитектур в Freedesktop SDK, подпись, сохранение истории и проверка репозитория обновлений GitHub Pages.
+- `packaging/release/build.sh`, `packaging/appimage/arm64.Dockerfile` — полная сборка форматов; ARM AppImage через Buildx/QEMU.

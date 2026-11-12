@@ -16,7 +16,7 @@ jobs:
   pins:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,11 +31,25 @@ jobs:
       - name: Check source
         if: steps.prepare.outputs.ready == 'true'
         run: sh packaging/check.sh
-      - name: Build and check AppImage
+      - uses: docker/setup-qemu-action@v3
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+        if: steps.prepare.outputs.ready == 'true'
+      - uses: docker/build-push-action@v6
+        if: steps.prepare.outputs.ready == 'true'
+        with:
+          context: .
+          file: packaging/appimage/arm64.Dockerfile
+          platforms: linux/arm64
+          outputs: type=local,dest=dist
+          cache-from: type=gha,scope=appimage-arm64
+          cache-to: type=gha,mode=max,scope=appimage-arm64
+      - name: Build and check distribution packages
         if: steps.prepare.outputs.ready == 'true'
         run: |
-          sh packaging/appimage/build.sh
-          sh packaging/appimage/check.sh
+          sh packaging/release/build.sh prerelease
       - name: Publish pin prerelease
         if: steps.prepare.outputs.ready == 'true'
         env:

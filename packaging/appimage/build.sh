@@ -10,9 +10,19 @@ CACHE="$PACK/build/cache"
 DIST="$ROOT/dist"
 mkdir -p "$CACHE" "$DIST"
 
-TOOL="$CACHE/appimagetool-x86_64.AppImage"
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) TOOL_ARCH=x86_64 ;;
+    aarch64) TOOL_ARCH=aarch64 ;;
+    *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+TOOL="$CACHE/appimagetool-$TOOL_ARCH.AppImage"
 TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
 TOOL_SHA="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+if [ "$ARCH" = aarch64 ]; then
+    TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-aarch64.AppImage"
+    TOOL_SHA="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
+fi
 if [ ! -s "$TOOL" ] || ! echo "$TOOL_SHA  $TOOL" | sha256sum -c - >/dev/null 2>&1; then
     curl -fL --retry 3 -o "$TOOL.part" "$TOOL_URL"
     echo "$TOOL_SHA  $TOOL.part" | sha256sum -c -
@@ -63,8 +73,9 @@ cp "$ROOT/assets/icon.svg" "$APPDIR/shinpi.svg"
 cp "$APPDIR/shinpi.svg" "$APPDIR/.DirIcon"
 cp "$APPDIR/shinpi.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/shinpi.svg"
 
-OUT="$DIST/shinpi-x86_64.AppImage"
-ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream "$APPDIR" "$OUT"
+OUT="$DIST/shinpi-$ARCH.AppImage"
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream \
+    -u "gh-releases-zsync|yrmuq|shinpi|latest|shinpi-$ARCH.AppImage.zsync" "$APPDIR" "$OUT"
 chmod +x "$OUT"
 cd "$DIST"
-sha256sum shinpi-x86_64.AppImage > shinpi-x86_64.AppImage.sha256
+sha256sum "shinpi-$ARCH.AppImage" "shinpi-$ARCH.AppImage.zsync" > "shinpi-$ARCH.AppImage.sha256"

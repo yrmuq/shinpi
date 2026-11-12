@@ -18,3 +18,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /packaging/appimage
+    schedule:
+      interval: monthly
+    groups:
+      build-images:
+        patterns: ["*"]

@@ -28,9 +28,9 @@ class DraftTests(unittest.TestCase):
     @patch.object(draft.subprocess, "run")
     @patch.object(draft, "api")
     def test_creates_only_a_draft_for_the_built_commit(self, api, upload, _):
-        api.side_effect = [{"object": {"sha": "a" * 40}}, [], {"html_url": "https://github.com/owner/repo/releases/1"}]
+        api.side_effect = [{"object": {"sha": "a" * 40}}, [], {"id": 1, "html_url": "https://github.com/owner/repo/releases/1"}, []]
         draft.main()
-        path, method, payload = api.call_args.args
+        path, method, payload = api.call_args_list[2].args
         self.assertEqual((path, method), ("repos/owner/repo/releases", "POST"))
         self.assertTrue(payload["draft"])
         self.assertEqual(payload["target_commitish"], "a" * 40)
@@ -46,3 +46,20 @@ class DraftTests(unittest.TestCase):
         draft.main()
         api.assert_called_once()
         upload.assert_not_called()
+
+    @patch.dict("os.environ", GITHUB_REPOSITORY="owner/repo", GITHUB_SHA="a" * 40, INCLUDE_FLATPAK="false")
+    @patch.object(Path, "is_file", return_value=True)
+    @patch.object(draft.subprocess, "run")
+    @patch.object(draft, "api")
+    def test_ordinary_build_removes_previous_optional_bundle(self, api, upload, _):
+        api.side_effect = [
+            {"object": {"sha": "a" * 40}},
+            [{"tag_name": "dev", "draft": True, "id": 7}],
+            {"id": 7, "html_url": "draft"},
+            [{"name": "shinpi-x86_64.flatpak", "id": 8},
+             {"name": "shinpi-x86_64.AppImage", "id": 9}],
+            None,
+        ]
+        draft.main()
+        self.assertEqual(api.call_args.args, ("repos/owner/repo/releases/assets/8", "DELETE"))
+        self.assertNotIn("flatpak", " ".join(upload.call_args.args[0]))

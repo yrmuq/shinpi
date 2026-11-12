@@ -1,0 +1,9 @@
+.git
+target
+dist
+vendor
+cargo
+flatpak-build
+flatpak-repo
+.flatpak-builder
+packaging/appimage/build

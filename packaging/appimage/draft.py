@@ -17,7 +17,7 @@ def api(path, method="GET", payload=None):
         capture_output=True,
         check=True,
     )
-    return json.loads(result.stdout)
+    return json.loads(result.stdout) if result.stdout.strip() else None
 
 
 def main():
@@ -27,11 +27,15 @@ def main():
     if ref["object"]["sha"] != commit:
         print("Skipping a superseded development build")
         return
-    assets = [Path("dist/shinpi-x86_64.AppImage"), Path("dist/shinpi-x86_64.AppImage.sha256")]
+    assets = [Path("dist/shinpi-x86_64.AppImage"), Path("dist/shinpi-x86_64.AppImage.sha256"), Path("dist/shinpi-x86_64.AppImage.zsync")]
+    if os.environ.get("INCLUDE_FLATPAK") == "true":
+        assets += [Path("dist/shinpi-x86_64.flatpak"), Path("dist/shinpi-x86_64.flatpak.sha256")]
     for asset in assets:
         if not asset.is_file():
             raise RuntimeError(f"Missing build asset: {asset}")
-    subprocess.run(["sha256sum", "-c", "shinpi-x86_64.AppImage.sha256"], cwd="dist", check=True)
+    for asset in assets:
+        if asset.suffix == ".sha256":
+            subprocess.run(["sha256sum", "-c", asset.name], cwd="dist", check=True)
     releases = []
     page = 1
     while True:
@@ -59,6 +63,11 @@ def main():
         ["gh", "release", "upload", "dev", *(str(asset) for asset in assets), "--repo", repo, "--clobber"],
         check=True,
     )
+    # A later ordinary build must remove optional assets from the previous build.
+    expected = {asset.name for asset in assets}
+    for asset in api(f"repos/{repo}/releases/{release['id']}/assets"):
+        if asset["name"] not in expected:
+            api(f"repos/{repo}/releases/assets/{asset['id']}", "DELETE")
     print(release["html_url"])
 
 

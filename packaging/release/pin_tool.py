@@ -14,22 +14,28 @@ def update(path):
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         release = json.load(response)
-    asset = next(a for a in release["assets"] if a["name"] == "appimagetool-x86_64.AppImage")
-    url = asset["browser_download_url"]
-    if not re.fullmatch(r"https://github.com/AppImage/appimagetool/releases/download/[^/]+/appimagetool-x86_64.AppImage", url):
-        raise ValueError("Unexpected appimagetool download URL")
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=60) as response:
-        for block in iter(lambda: response.read(1024 * 1024), b""):
-            digest.update(block)
-    sha = digest.hexdigest()
-    if asset.get("digest") and asset["digest"] != f"sha256:{sha}":
-        raise ValueError("appimagetool checksum does not match GitHub's digest")
     text = path.read_text()
-    result, urls = re.subn(r'^TOOL_URL="[^"]+"$', f'TOOL_URL="{url}"', text, flags=re.M)
-    result, hashes = re.subn(r'^TOOL_SHA="[a-f0-9]+"$', f'TOOL_SHA="{sha}"', result, flags=re.M)
-    if (urls, hashes) != (1, 1):
-        raise ValueError("Expected exactly one appimagetool pin")
+    result = text
+    # Refresh each architecture pin together; never leave ARM on an older tool.
+    for arch, indent in (("x86_64", ""), ("aarch64", "    ")):
+        if arch == "aarch64" and 'appimagetool-aarch64.AppImage' not in text:
+            continue
+        name = f"appimagetool-{arch}.AppImage"
+        asset = next(a for a in release["assets"] if a["name"] == name)
+        url = asset["browser_download_url"]
+        if not re.fullmatch(rf"https://github.com/AppImage/appimagetool/releases/download/[^/]+/{re.escape(name)}", url):
+            raise ValueError("Unexpected appimagetool download URL")
+        digest = hashlib.sha256()
+        with urllib.request.urlopen(url, timeout=60) as response:
+            for block in iter(lambda: response.read(1024 * 1024), b""):
+                digest.update(block)
+        sha = digest.hexdigest()
+        if asset.get("digest") and asset["digest"] != f"sha256:{sha}":
+            raise ValueError("appimagetool checksum does not match GitHub's digest")
+        result, urls = re.subn(rf'^{indent}TOOL_URL="[^\"]+"$', f'{indent}TOOL_URL="{url}"', result, flags=re.M)
+        result, hashes = re.subn(rf'^{indent}TOOL_SHA="[a-f0-9]+"$', f'{indent}TOOL_SHA="{sha}"', result, flags=re.M)
+        if (urls, hashes) != (1, 1):
+            raise ValueError("Expected exactly one appimagetool pin per architecture")
     if result == text:
         return False
     path.write_text(result)
