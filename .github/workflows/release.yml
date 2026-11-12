@@ -49,13 +49,13 @@ jobs:
         run: |
           sh packaging/flatpak/publish.sh
           sh packaging/flatpak/check.sh
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         if: steps.prepare.outputs.ready == 'true'
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         if: steps.prepare.outputs.ready == 'true'
         with:
           path: flatpak-repo
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: pages
         if: steps.prepare.outputs.ready == 'true'
       - name: Verify the deployed update repository
