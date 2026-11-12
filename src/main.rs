@@ -745,6 +745,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             labels: initial_labels,
         }
         .assume_sni_available(true)
+        // Flatpak forbids owning ksni's PID-based well-known bus name.
+        .disable_dbus_name(std::path::Path::new("/.flatpak-info").exists())
         .spawn()
         .await
     })?;

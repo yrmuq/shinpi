@@ -10,6 +10,7 @@
     "--socket=fallback-x11",
     "--device=all",
     "--share=ipc",
+    "--filesystem=xdg-config/kdeglobals:ro",
     "--system-talk-name=org.bluez",
     "--system-talk-name=org.freedesktop.UPower",
     "--talk-name=org.kde.StatusNotifierWatcher",
