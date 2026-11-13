@@ -130,11 +130,14 @@ fn ensure_popup(
     state: &Rc<RefCell<State>>,
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Popup> {
-    if let Some(popup) = &shell.popup {
+    let pinned = if let Some(popup) = &shell.popup {
         if popup.window().is_visible() {
             return Some(popup.clone_strong());
         }
-    }
+        popup.get_pinned()
+    } else {
+        false
+    };
     // Slint 1.18 discards native attributes on Wayland hide; recreate the panel adapter.
     shell.notices = None;
     shell.popup = None;
@@ -145,6 +148,7 @@ fn ensure_popup(
     }
     CREATING_PANEL.set("");
     let popup = result.map_err(|e| eprintln!("shinpi: popup: {e}")).ok()?;
+    popup.set_pinned(pinned);
     let tx = sender.clone();
     popup.on_configure(move || {
         let _ = tx.send(Command::Settings);
