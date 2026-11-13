@@ -102,6 +102,7 @@ struct Shell {
 
 thread_local! {
     static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") };
+    static LOCK_WINDOW_SIZE: Cell<bool> = const { Cell::new(true) };
 }
 
 const POPUP_CLASS: &str = "shinpi-popup";
@@ -113,7 +114,7 @@ fn window_attributes(
     use winit::platform::x11::{WindowAttributesExtX11, WindowType};
     let popup = !panel.is_empty();
     let attributes = attributes
-        .with_resizable(false)
+        .with_resizable(!LOCK_WINDOW_SIZE.get())
         .with_transparent(popup)
         .with_title(if popup { panel } else { "shinpi" });
     let class = if popup { POPUP_CLASS } else { "shinpi" };
@@ -263,7 +264,7 @@ fn sync_notices(
             .as_ref()
             .is_some_and(|p| p.window().is_visible())
             && !state.closing
-            && state.config.history_enabled
+            && state.config.history_count > 0
             && !state.config.history_hidden
             && !state.config.history.is_empty()
     };
@@ -414,10 +415,6 @@ fn ensure_settings(
         let _ = tx.send(Command::PanelWidth(value as u32));
     });
     let tx = sender.clone();
-    settings.on_history_enabled_selected(move |value| {
-        let _ = tx.send(Command::HistoryEnabled(value));
-    });
-    let tx = sender.clone();
     settings.on_history_count_selected(move |value| {
         let _ = tx.send(Command::HistoryCount(value as u32));
     });
@@ -450,13 +447,22 @@ fn ensure_settings(
     settings.on_reset_dev(move || {
         let _ = tx.send(Command::ResetDev);
     });
-    let weak = settings.as_weak();
-    settings.on_dismiss(move || {
-        if let Some(settings) = weak.upgrade() {
-            settings.invoke_close_dialogs();
-            let _ = settings.hide();
-        }
+    let tx = sender.clone();
+    settings.on_lock_window_size_changed(move |locked| {
+        let _ = tx.send(Command::LockWindowSize(locked));
     });
+    let tx = sender.clone();
+    settings
+        .window()
+        .on_winit_window_event(move |window, event| {
+            if let winit::event::WindowEvent::Resized(size) = event {
+                if window.is_visible() && !LOCK_WINDOW_SIZE.get() {
+                    let size = size.to_logical::<u32>(f64::from(window.scale_factor()));
+                    let _ = tx.send(Command::SettingsResized(size.width, size.height));
+                }
+            }
+            EventResult::Propagate
+        });
     let weak = settings.as_weak();
     settings.window().on_close_requested(move || {
         if let Some(settings) = weak.upgrade() {
@@ -474,6 +480,7 @@ fn resize_settings(shell: &Shell, config: &config::Config) {
         settings.set_settings_width(config.settings_width as i32);
         settings.set_settings_height(config.settings_height as i32);
         settings.set_logo_size(config.logo_size as i32);
+        settings.set_lock_window_size(config.lock_window_size);
         let _ = settings.window().with_winit_window(|window| {
             window.set_min_inner_size(None::<winit::dpi::LogicalSize<f64>>);
             window.set_max_inner_size(None::<winit::dpi::LogicalSize<f64>>);
@@ -482,6 +489,20 @@ fn resize_settings(shell: &Shell, config: &config::Config) {
             config.settings_width as f32,
             config.settings_height as f32,
         ));
+        let _ = settings.window().with_winit_window(|window| {
+            let (minimum, maximum) = if config.lock_window_size {
+                let size =
+                    winit::dpi::LogicalSize::new(config.settings_width, config.settings_height);
+                (size, size)
+            } else {
+                (
+                    winit::dpi::LogicalSize::new(360, 240),
+                    winit::dpi::LogicalSize::new(2200, 1800),
+                )
+            };
+            window.set_min_inner_size(Some(minimum));
+            window.set_max_inner_size(Some(maximum));
+        });
     }
 }
 
@@ -501,6 +522,11 @@ fn paint(shell: &Shell, state: &State) {
             // Slint applies DPI scaling; rounding before mapping changed the font on the next repaint.
             window.set_ui_font_size(font.size_px);
             window.set_ui_font_weight(font.weight);
+            let _ = window.window().with_winit_window(|native| {
+                if native.is_resizable() == cfg.lock_window_size {
+                    native.set_resizable(!cfg.lock_window_size);
+                }
+            });
             let breeze = window.global::<Breeze>();
             breeze.set_window(color(palette.window));
             breeze.set_button(color(palette.button));
@@ -516,7 +542,7 @@ fn paint(shell: &Shell, state: &State) {
     if let Some(popup) = &shell.popup {
         window_style!(popup);
         popup.set_panel_width(cfg.panel_width as i32);
-        popup.set_history_enabled(cfg.history_enabled);
+        popup.set_history_enabled(cfg.history_count > 0);
         popup.set_history_hidden(cfg.history_hidden);
         if let Some(icon) = icons::theme_icon("configure") {
             popup.set_icon_configure(icon.image);
@@ -536,6 +562,7 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_settings_width(cfg.settings_width as i32);
         settings.set_settings_height(cfg.settings_height as i32);
         settings.set_logo_size(cfg.logo_size as i32);
+        settings.set_lock_window_size(cfg.lock_window_size);
         settings.set_dev_open(cfg.dev_tab);
         if cfg.dev_tab {
             let mut names = vec!["configure", "window-pin"];
@@ -589,7 +616,6 @@ fn paint(shell: &Shell, state: &State) {
             .into(),
         );
         settings.set_panel_width(cfg.panel_width as i32);
-        settings.set_history_enabled(cfg.history_enabled);
         settings.set_history_count(cfg.history_count as i32);
         let languages = i18n::languages();
         let mut names = vec![catalog.tr("System language").into()];
@@ -766,7 +792,7 @@ fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, 
             return;
         }
         let _ = popup.window().with_winit_window(|w| {
-            w.set_resizable(false);
+            w.set_title("shinpi-devices");
             w.focus_window();
         });
         let mut state = state.borrow_mut();
@@ -840,6 +866,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let Some(_lock) = single_instance()? else {
         return Ok(());
     };
+    LOCK_WINDOW_SIZE.set(config::load().lock_window_size);
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
@@ -1080,12 +1107,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         data.borrow_mut().config.panel_width = value.clamp(280, 800);
                         changed = true;
                     }
-                    Command::HistoryEnabled(value) => {
-                        data.borrow_mut().config.history_enabled = value;
-                        changed = true;
-                    }
                     Command::HistoryCount(value) => {
-                        data.borrow_mut().config.history_count = value.clamp(1, 20);
+                        let mut state = data.borrow_mut();
+                        state.config.history_count = value.min(20);
+                        state.config.history_hidden = false;
                         changed = true;
                     }
                     Command::ToggleHistory => {
@@ -1145,6 +1170,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Command::ResetAppearance => {
                         let mut state = data.borrow_mut();
                         state.config.reset_appearance();
+                        LOCK_WINDOW_SIZE.set(state.config.lock_window_size);
                         state.catalog = i18n::Catalog::load(&state.config.language);
                         resize_settings(&windows, &state.config);
                         changed = true;
@@ -1152,8 +1178,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Command::ResetDev => {
                         let mut state = data.borrow_mut();
                         state.config.reset_dev();
+                        LOCK_WINDOW_SIZE.set(state.config.lock_window_size);
                         resize_settings(&windows, &state.config);
                         changed = true;
+                    }
+                    Command::LockWindowSize(locked) => {
+                        let mut state = data.borrow_mut();
+                        state.config.lock_window_size = locked;
+                        LOCK_WINDOW_SIZE.set(locked);
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::SettingsResized(width, height) => {
+                        changed |= data.borrow_mut().config.record_window_size(width, height);
                     }
                     Command::Quit => {
                         let _ = slint::quit_event_loop();
@@ -1341,5 +1378,9 @@ mod window_tests {
         assert!(notices.transparent && !notices.resizable);
         assert!(!popup.resizable && !settings.resizable);
         assert!(popup.transparent && !settings.transparent);
+        LOCK_WINDOW_SIZE.set(false);
+        let unlocked = window_attributes(winit::window::WindowAttributes::default(), "");
+        assert!(unlocked.resizable);
+        LOCK_WINDOW_SIZE.set(true);
     }
 }

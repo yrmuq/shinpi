@@ -8,16 +8,20 @@ function textOf(value) {
 }
 
 function isOurs(window) {
-    const klass = String(window.resourceClass);
-    return !window.dialog && (klass === "shinpi" || klass === "shinpi-popup");
+    const classes = (textOf(window.resourceClass) + " " + textOf(window.resourceName)).split(/\s+/);
+    return !window.dialog && (classes.includes("shinpi") || classes.includes("shinpi-popup"));
+}
+
+function captionOf(window) {
+    return textOf(window.captionNormal || window.caption);
 }
 
 function isPopup(window) {
-    return isOurs(window) && textOf(window.caption) === "shinpi-devices";
+    return isOurs(window) && captionOf(window) === "shinpi-devices";
 }
 
 function isNotice(window) {
-    return isOurs(window) && textOf(window.caption) === "shinpi-notices";
+    return isOurs(window) && captionOf(window) === "shinpi-notices";
 }
 
 function visibleNotices() {
@@ -29,10 +33,15 @@ function repositionNotices() {
     if (!popup) { return; }
     const pf = popup.frameGeometry;
     for (const notice of visibleNotices()) {
+        const entry = trackedNotices.get(notice);
+        if (entry && entry.moving) { continue; }
         const nf = notice.frameGeometry;
-        const target = { x: pf.x, y: pf.y - nf.height, width: pf.width, height: nf.height };
-        if (nf.x !== target.x || nf.y !== target.y || nf.width !== target.width) {
-            notice.frameGeometry = target;
+        const ratio = ratioOf(notice);
+        const target = { x: snap(pf.x, ratio), y: snap(pf.y - nf.height, ratio), width: pf.width, height: nf.height };
+        if (Math.abs(nf.x - target.x) >= 0.5 || Math.abs(nf.y - target.y) >= 0.5 || Math.abs(nf.width - target.width) >= 0.5) {
+            if (entry) { entry.moving = true; }
+            try { notice.frameGeometry = target; }
+            finally { if (entry) { entry.moving = false; } }
         }
     }
 }
@@ -161,7 +170,7 @@ function place(entry) {
     target.x = snap(target.x, ratio);
     const noticeHeight = Math.max(0, ...visibleNotices().map((notice) => notice.frameGeometry.height));
     target.y = snap(Math.max(target.y, area.y + GAP + noticeHeight), ratio);
-    if (frame.x === target.x && frame.y === target.y) {
+    if (Math.abs(frame.x - target.x) < 0.5 && Math.abs(frame.y - target.y) < 0.5) {
         repositionNotices();
         return;
     }
@@ -200,13 +209,15 @@ function track(window) {
     onShow();
 }
 
-const trackedNotices = new Set();
+const trackedNotices = new Map();
 function trackNotice(window) {
     if (!isNotice(window) || trackedNotices.has(window)) { return; }
-    trackedNotices.add(window);
+    const entry = { moving: false };
+    trackedNotices.set(window, entry);
     hideFromTaskbar(window);
     window.keepAbove = true;
     const update = () => {
+        if (entry.moving) { return; }
         hideFromTaskbar(window);
         for (const entry of windows.values()) { place(entry); }
         repositionNotices();
@@ -228,6 +239,7 @@ function arm(window) {
     };
     identify();
     if (window.captionChanged) { window.captionChanged.connect(identify); }
+    if (window.captionNormalChanged) { window.captionNormalChanged.connect(identify); }
     if (window.windowClassChanged) { window.windowClassChanged.connect(identify); }
 }
 workspace.windowAdded.connect(arm);

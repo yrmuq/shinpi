@@ -4,7 +4,7 @@
 
 - Do not build or publish aarch64 AppImage or Flatpak packages until that support is explicitly requested.
 - Keep the About attribution table limited to Component, Upstream and Integration Details, matching yoin's dev UI; the user explicitly excluded a License column.
-- Appearance Reset preserves devices, saved readings, notification timestamps, history and notification rules; Dev Reset restores only window dimensions and logo size.
+- Appearance Reset preserves devices, saved readings, notification timestamps, history and notification rules; Dev Reset restores window dimensions, logo size and the resize lock.
 
 ## External Compatibility Constraints
 

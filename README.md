@@ -46,9 +46,12 @@
 | Red `×` in Settings | Remove a device from the panel. |
 | Diagnostics in Settings → Devices | Open source and access diagnostics. |
 | Open About | Automatically check the latest stable version; open its release page when an update is available. |
-| Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size and Dev visibility are saved automatically. |
-| Reset in Dev | Restore the default window dimensions and logo size. |
+| Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size, resize lock and Dev visibility are saved automatically. |
+| Lock window resizing in Dev | Prevent manual window resizing (enabled by default). Unlocked settings window dimensions are saved when resized. |
+| Icon sources in Dev | Expand or collapse icon format diagnostics. |
+| Reset in Dev | Restore the default window dimensions, logo size and resize lock. |
 | Reset in General → Appearance | Restore appearance defaults and hide Dev; keep selected devices, notification history and notification rules. |
+| Recent notifications in Panels | Set the displayed history count; `0` disables the notification panel. |
 | Triangle | Toggle notification history. |
 | `×` on a notification | Dismiss the entry. |
 | Pin icon | Keep the panel open when it loses focus. |

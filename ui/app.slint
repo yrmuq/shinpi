@@ -519,8 +519,11 @@ export component Settings inherits Window {
     title: "shinpi";
     icon: @image-url("../assets/icon.svg");
     in-out property <int> settings-width: 600;
-    in-out property <int> settings-height: 620;
-    in-out property <int> logo-size: 96;
+    in-out property <int> settings-height: 630;
+    in-out property <int> logo-size: 69;
+    in-out property <bool> lock-window-size: true;
+    property <bool> icons-expanded: false;
+    callback lock-window-size-changed(bool);
     in-out property <bool> dev-open;
     in-out property <string> dev-report;
     in-out property <[Attribution]> parts;
@@ -529,11 +532,11 @@ export component Settings inherits Window {
     callback reset-dev();
     callback reset-appearance();
     preferred-width: settings-width * 1px;
-    min-width: settings-width * 1px;
-    max-width: settings-width * 1px;
+    min-width: lock-window-size ? settings-width * 1px : 360px;
+    max-width: lock-window-size ? settings-width * 1px : 2200px;
     preferred-height: settings-height * 1px;
-    min-height: settings-height * 1px;
-    max-height: settings-height * 1px;
+    min-height: lock-window-size ? settings-height * 1px : 240px;
+    max-height: lock-window-size ? settings-height * 1px : 1800px;
     in-out property <bool> dark;
     in-out property <int> tab-index;
     changed tab-index => { if (root.tab-index == 3) { root.check-update(); } }
@@ -551,10 +554,8 @@ export component Settings inherits Window {
     in-out property <int> orientation;
     in-out property <bool> colored: true;
     in-out property <int> panel-width: 300;
-    in-out property <bool> history-enabled: true;
     in-out property <int> history-count: 3;
     callback panel-width-selected(int);
-    callback history-enabled-selected(bool);
     callback history-count-selected(int);
     in-out property <bool> notifications: true;
     in-out property <int> threshold: 15;
@@ -574,7 +575,6 @@ export component Settings inherits Window {
     callback add();
     callback edit-device(int);
     callback remove-device(int);
-    callback dismiss();
     in-out property <string> version;
     in-out property <string> update-status;
     in-out property <bool> checking-update;
@@ -711,10 +711,8 @@ export component Settings inherits Window {
                             toggled => { root.colored-selected(self.checked); }
                         }
                     }
-                    Text { text: Translations.tr(36); color: Breeze.inactive; wrap: word-wrap; }
                     HorizontalLayout {
-                        alignment: start;
-                        Button { text: Translations.tr(106); clicked => { root.reset-appearance(); } }
+                        Button { text: Translations.tr(106); horizontal-stretch: 1; clicked => { root.reset-appearance(); } }
                     }
                     Rectangle { height: 1px; background: Breeze.frame; }
                     SettingRow {
@@ -744,10 +742,6 @@ export component Settings inherits Window {
                             edited(value) => { root.repeat-selected(value); }
                         }
                     }
-                    Text {
-                        text: Translations.tr(40);
-                        color: Breeze.inactive; wrap: word-wrap;
-                    }
                 }
             }
             if root.tab-index == 1: ScrollView {
@@ -764,26 +758,14 @@ export component Settings inherits Window {
                             edited(value) => { root.panel-width-selected(value); }
                         }
                     }
-                    Text { text: Translations.tr(43); color: Breeze.inactive; wrap: word-wrap; }
-                    SettingRow {
-                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
-                        label: Translations.tr(44);
-                        CheckBox {
-                            accessible-label: Translations.tr(44);
-                            checked <=> root.history-enabled;
-                            toggled => { root.history-enabled-selected(self.checked); }
-                        }
-                    }
                     SettingRow {
                         label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
                         label: Translations.tr(45);
                         SpinBox {
-                            enabled: root.history-enabled;
-                            minimum: 1; maximum: 20; value <=> root.history-count;
+                            minimum: 0; maximum: 20; value <=> root.history-count;
                             edited(value) => { root.history-count-selected(value); }
                         }
                     }
-                    Text { text: Translations.tr(46); color: Breeze.inactive; wrap: word-wrap; }
                 }
             }
             if root.tab-index == 2: VerticalLayout {
@@ -812,14 +794,11 @@ export component Settings inherits Window {
                         }
                     }
                     HorizontalLayout {
-                        alignment: end;
-                        Button { text: Translations.tr(6); clicked => { root.add(); } }
+                        spacing: 16px;
+                        Button { text: Translations.tr(50); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; clicked => { diagnostics-dialog.show(); } }
+                        Button { text: Translations.tr(6); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; clicked => { root.add(); } }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
-                    HorizontalLayout {
-                        alignment: start;
-                        Button { text: Translations.tr(50); clicked => { diagnostics-dialog.show(); } }
-                    }
                 }
             if root.tab-index == 3: ScrollView {
                 content-width: self.visible-width;
@@ -842,6 +821,11 @@ export component Settings inherits Window {
                         Text { text: Translations.tr(95) + ":"; color: Breeze.fg; vertical-alignment: center; }
                         AboutLink { label: "github"; activate => { root.open-link("https://github.com/yrmuq/shinpi"); } }
                     }
+                    HorizontalLayout {
+                        alignment: start; spacing: 6px;
+                        Text { text: Translations.tr(114); color: Breeze.fg; vertical-alignment: center; }
+                        AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
+                    }
                     Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; }
                     if root.update-status != "": Text {
                         text: root.update-status; wrap: word-wrap;
@@ -851,12 +835,7 @@ export component Settings inherits Window {
                         alignment: start;
                         Button { text: Translations.tr(98); clicked => { root.open-link("https://github.com/yrmuq/shinpi/releases/latest"); } }
                     }
-                    Text { text: Translations.tr(113); color: Breeze.fg; wrap: word-wrap; }
-                    HorizontalLayout {
-                        alignment: start; spacing: 6px;
-                        Text { text: Translations.tr(114); color: Breeze.fg; vertical-alignment: center; }
-                        AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
-                    }
+                    Rectangle { height: root.ui-font-size * 2; background: transparent; }
                     ScrollView {
                         height: parts-table.preferred-height + 14px;
                         vertical-scrollbar-policy: always-off;
@@ -898,19 +877,29 @@ export component Settings inherits Window {
                         SpinBox { minimum: 32; maximum: 256; value <=> root.logo-size;
                             edited => { root.metrics-changed(root.settings-width, root.settings-height, root.logo-size); } }
                     }
-                    Text { text: Translations.tr(116); color: Breeze.fg; font-weight: 600; }
-                    Text { text: root.dev-report; color: Breeze.fg; wrap: word-wrap; }
+                    SettingRow {
+                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
+                        label: Translations.tr(124);
+                        CheckBox {
+                            checked <=> root.lock-window-size;
+                            accessible-label: Translations.tr(124);
+                            toggled => { root.lock-window-size-changed(self.checked); }
+                        }
+                    }
+                    Button {
+                        text: (root.icons-expanded ? "▾ " : "▸ ") + Translations.tr(116);
+                        accessible-label: Translations.tr(116);
+                        accessible-expandable: true;
+                        accessible-expanded: root.icons-expanded;
+                        clicked => { root.icons-expanded = !root.icons-expanded; }
+                    }
+                    if root.icons-expanded: Text { text: root.dev-report; color: Breeze.fg; wrap: word-wrap; }
                     HorizontalLayout {
-                        alignment: start;
-                        Button { text: Translations.tr(106); clicked => { root.reset-dev(); } }
+                        Button { text: Translations.tr(106); horizontal-stretch: 1; clicked => { root.reset-dev(); } }
                     }
                 }
             }
         }
         if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
-        HorizontalLayout {
-            alignment: end;
-            Button { text: Translations.tr(15); clicked => { root.dismiss(); } }
-        }
     }
 }

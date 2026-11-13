@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 pub const DEFAULT_SETTINGS_WIDTH: u32 = 600;
-pub const DEFAULT_SETTINGS_HEIGHT: u32 = 620;
-pub const DEFAULT_LOGO_SIZE: u32 = 96;
+pub const DEFAULT_SETTINGS_HEIGHT: u32 = 630;
+pub const DEFAULT_LOGO_SIZE: u32 = 69;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -17,7 +17,8 @@ pub struct Config {
     pub low_threshold: u8,
     pub repeat_minutes: u32,
     pub panel_width: u32,
-    pub history_enabled: bool,
+    #[serde(rename = "history_enabled", skip_serializing)]
+    legacy_history_enabled: Option<bool>,
     pub history_hidden: bool,
     pub history_count: u32,
     pub history: Vec<crate::notices::Note>,
@@ -30,6 +31,8 @@ pub struct Config {
     pub logo_size: u32,
     #[serde(skip_serializing_if = "is_false")]
     pub dev_tab: bool,
+    #[serde(skip_serializing_if = "is_true")]
+    pub lock_window_size: bool,
 }
 
 impl Default for Config {
@@ -43,7 +46,7 @@ impl Default for Config {
             low_threshold: 15,
             repeat_minutes: 60,
             panel_width: 300,
-            history_enabled: true,
+            legacy_history_enabled: None,
             history_hidden: false,
             history_count: 3,
             history: Vec::new(),
@@ -52,6 +55,7 @@ impl Default for Config {
             settings_height: DEFAULT_SETTINGS_HEIGHT,
             logo_size: DEFAULT_LOGO_SIZE,
             dev_tab: false,
+            lock_window_size: true,
         }
     }
 }
@@ -75,10 +79,29 @@ impl Config {
         self.logo_size = self.logo_size.clamp(32, 256);
     }
 
+    pub fn record_window_size(&mut self, width: u32, height: u32) -> bool {
+        if self.lock_window_size {
+            return false;
+        }
+        let previous = (self.settings_width, self.settings_height);
+        self.settings_width = width;
+        self.settings_height = height;
+        self.normalize_metrics();
+        previous != (self.settings_width, self.settings_height)
+    }
+
     pub fn reset_dev(&mut self) {
         self.settings_width = DEFAULT_SETTINGS_WIDTH;
         self.settings_height = DEFAULT_SETTINGS_HEIGHT;
         self.logo_size = DEFAULT_LOGO_SIZE;
+        self.lock_window_size = true;
+    }
+
+    pub fn normalize_history(&mut self) {
+        self.history_count = self.history_count.min(20);
+        if self.legacy_history_enabled.take() == Some(false) {
+            self.history_count = 0;
+        }
     }
 
     pub fn reset_appearance(&mut self) {
@@ -88,7 +111,7 @@ impl Config {
         self.tray_orientation = defaults.tray_orientation;
         self.colored_icon = defaults.colored_icon;
         self.panel_width = defaults.panel_width;
-        self.history_enabled = defaults.history_enabled;
+        self.legacy_history_enabled = None;
         self.history_hidden = defaults.history_hidden;
         self.history_count = defaults.history_count;
         self.reset_dev();
@@ -147,6 +170,9 @@ fn default_logo(value: &u32) -> bool {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+fn is_true(value: &bool) -> bool {
+    *value
+}
 
 pub fn home() -> PathBuf {
     std::env::var_os("HOME")
@@ -175,7 +201,7 @@ pub fn load() -> Config {
     };
     config.panel_width = config.panel_width.clamp(280, 800);
     config.normalize_metrics();
-    config.history_count = config.history_count.clamp(1, 20);
+    config.normalize_history();
     let excess = config.history.len().saturating_sub(crate::notices::LIMIT);
     config.history.drain(..excess);
     config.tray_orientation = config.tray_orientation.min(3);
@@ -205,6 +231,28 @@ pub fn save(config: &Config) -> std::io::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn notification_count_replaces_the_old_enable_switch() {
+        for (json, expected) in [
+            (r#"{"history_count":0}"#, 0),
+            (r#"{"history_count":7}"#, 7),
+            (r#"{"history_enabled":false,"history_count":7}"#, 0),
+            (r#"{"history_enabled":true,"history_count":7}"#, 7),
+            (r#"{"history_count":100}"#, 20),
+        ] {
+            let mut config: Config = serde_json::from_str(json).unwrap();
+            config.normalize_history();
+            assert_eq!(config.history_count, expected);
+            let saved = serde_json::to_string(&config).unwrap();
+            assert!(!saved.contains("history_enabled"));
+            assert_eq!(
+                serde_json::from_str::<Config>(&saved)
+                    .unwrap()
+                    .history_count,
+                expected
+            );
+        }
+    }
+    #[test]
     fn dev_settings_round_trip_and_resets_preserve_device_and_notification_data() {
         let mut config: Config = serde_json::from_str("{}").unwrap();
         let json = serde_json::to_string(&config).unwrap();
@@ -215,6 +263,7 @@ mod tests {
         config.settings_height = 5000;
         config.logo_size = 1;
         config.dev_tab = true;
+        config.lock_window_size = false;
         config.theme = "dark".into();
         config.language = "Russian".into();
         config.panel_width = 450;
@@ -238,7 +287,12 @@ mod tests {
             (360, 1800, 32)
         );
         assert!(restored.dev_tab);
+        assert!(!restored.lock_window_size);
+        assert!(restored.record_window_size(800, 700));
+        assert!(!restored.record_window_size(800, 700));
         restored.reset_dev();
+        assert!(restored.lock_window_size);
+        assert!(!restored.record_window_size(900, 800));
         assert!(restored.dev_tab);
         assert_eq!(restored.theme, "dark");
         assert_eq!(restored.panel_width, 450);
@@ -248,7 +302,7 @@ mod tests {
                 restored.settings_height,
                 restored.logo_size
             ),
-            (600, 620, 96)
+            (600, 630, 69)
         );
         restored.reset_appearance();
         assert!(!restored.dev_tab);
@@ -270,7 +324,7 @@ mod tests {
         assert!(config.colored_icon);
         assert_eq!(config.panel_width, 300);
         assert_eq!(config.history_count, 3);
-        assert!(config.history_enabled && !config.history_hidden);
+        assert!(!config.history_hidden && config.history_count > 0);
         assert!(config.history.is_empty());
         let mut a = Device::new("mouse".into(), "Mouse".into(), Kind::Mouse, "UPower");
         a.reading.percent = Some(12);
