@@ -539,8 +539,8 @@ export component Settings inherits Window {
     max-height: lock-window-size ? settings-height * 1px : 1800px;
     in-out property <bool> dark;
     in-out property <int> tab-index;
-    changed tab-index => { if (root.tab-index == 3) { root.check-update(); } }
-    changed dev-open => { if (!root.dev-open && root.tab-index == 4) { root.tab-index = 3; } }
+    changed tab-index => { if (root.tab-index == 2) { root.about-opened(); } }
+    changed dev-open => { if (!root.dev-open && root.tab-index == 3) { root.tab-index = 2; } }
     in-out property <string> ui-font-family: "Noto Sans";
     in-out property <length> ui-font-size: 13.333px;
     in-out property <int> ui-font-weight: 400;
@@ -580,6 +580,9 @@ export component Settings inherits Window {
     in-out property <bool> checking-update;
     in-out property <bool> update-available;
     in-out property <bool> update-current;
+    in-out property <bool> auto-check-updates: true;
+    callback auto-check-updates-changed(bool);
+    callback about-opened();
     callback check-update();
     callback open-link(string);
     in-out property <[DeviceRow]> found-rows;
@@ -661,8 +664,8 @@ export component Settings inherits Window {
         padding: 12px;
         spacing: 10px;
         PageTabs {
-            labels: root.dev-open ? [Translations.tr(25), Translations.tr(41), Translations.tr(1), Translations.tr(93), "Dev"]
-                : [Translations.tr(25), Translations.tr(41), Translations.tr(1), Translations.tr(93)];
+            labels: root.dev-open ? [Translations.tr(25), Translations.tr(1), Translations.tr(93), "Dev"]
+                : [Translations.tr(25), Translations.tr(1), Translations.tr(93)];
             selected <=> root.tab-index;
         }
         Rectangle {
@@ -711,10 +714,24 @@ export component Settings inherits Window {
                             toggled => { root.colored-selected(self.checked); }
                         }
                     }
-                    HorizontalLayout {
-                        Button { text: Translations.tr(106); horizontal-stretch: 1; clicked => { root.reset-appearance(); } }
+                    SettingRow {
+                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
+                        label: Translations.tr(42);
+                        SpinBox {
+                            minimum: 280; maximum: 800; value <=> root.panel-width;
+                            edited(value) => { root.panel-width-selected(value); }
+                        }
+                    }
+                    SettingRow {
+                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
+                        label: Translations.tr(45);
+                        SpinBox {
+                            minimum: 0; maximum: 20; value <=> root.history-count;
+                            edited(value) => { root.history-count-selected(value); }
+                        }
                     }
                     Rectangle { height: 1px; background: Breeze.frame; }
+                    Text { text: Translations.tr(125); color: Breeze.fg; font-weight: 600; }
                     SettingRow {
                         label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
                         label: Translations.tr(37);
@@ -744,31 +761,7 @@ export component Settings inherits Window {
                     }
                 }
             }
-            if root.tab-index == 1: ScrollView {
-                content-width: self.visible-width;
-                VerticalLayout {
-                    padding: 12px;
-                    spacing: 14px;
-                    alignment: start;
-                    SettingRow {
-                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
-                        label: Translations.tr(42);
-                        SpinBox {
-                            minimum: 280; maximum: 800; value <=> root.panel-width;
-                            edited(value) => { root.panel-width-selected(value); }
-                        }
-                    }
-                    SettingRow {
-                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
-                        label: Translations.tr(45);
-                        SpinBox {
-                            minimum: 0; maximum: 20; value <=> root.history-count;
-                            edited(value) => { root.history-count-selected(value); }
-                        }
-                    }
-                }
-            }
-            if root.tab-index == 2: VerticalLayout {
+            if root.tab-index == 1: VerticalLayout {
                     padding: 8px;
                     spacing: 10px;
                     if root.rows.length == 0: Text { text: Translations.tr(47); color: Breeze.inactive; wrap: word-wrap; vertical-stretch: 0; }
@@ -800,7 +793,7 @@ export component Settings inherits Window {
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
-            if root.tab-index == 3: ScrollView {
+            if root.tab-index == 2: ScrollView {
                 content-width: self.visible-width;
                 VerticalLayout {
                     padding-left: 23px; padding-right: 23px;
@@ -826,7 +819,15 @@ export component Settings inherits Window {
                         Text { text: Translations.tr(114); color: Breeze.fg; vertical-alignment: center; }
                         AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
                     }
-                    Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                        if !root.auto-check-updates: Button {
+                            text: Translations.tr(97);
+                            enabled: !root.checking-update;
+                            clicked => { root.check-update(); }
+                        }
+                    }
                     if root.update-status != "": Text {
                         text: root.update-status; wrap: word-wrap;
                         color: root.update-current ? #27ae60 : Breeze.fg;
@@ -855,7 +856,7 @@ export component Settings inherits Window {
                     }
                 }
             }
-            if root.tab-index == 4 && root.dev-open: ScrollView {
+            if root.tab-index == 3 && root.dev-open: ScrollView {
                 content-width: self.visible-width;
                 VerticalLayout {
                     padding: 12px; spacing: 14px; alignment: start;
@@ -886,6 +887,15 @@ export component Settings inherits Window {
                             toggled => { root.lock-window-size-changed(self.checked); }
                         }
                     }
+                    SettingRow {
+                        label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
+                        label: Translations.tr(126);
+                        CheckBox {
+                            checked <=> root.auto-check-updates;
+                            accessible-label: Translations.tr(126);
+                            toggled => { root.auto-check-updates-changed(self.checked); }
+                        }
+                    }
                     Button {
                         text: (root.icons-expanded ? "▾ " : "▸ ") + Translations.tr(116);
                         accessible-label: Translations.tr(116);
@@ -899,6 +909,10 @@ export component Settings inherits Window {
                     }
                 }
             }
+        }
+        if root.tab-index == 0: HorizontalLayout {
+            padding-left: 12px; padding-right: 12px;
+            Button { text: Translations.tr(106); horizontal-stretch: 1; clicked => { root.reset-appearance(); } }
         }
         if root.error != "": Text { text: root.error; color: #da4453; wrap: word-wrap; }
     }

@@ -33,6 +33,8 @@ pub struct Config {
     pub dev_tab: bool,
     #[serde(skip_serializing_if = "is_true")]
     pub lock_window_size: bool,
+    #[serde(skip_serializing_if = "is_true")]
+    pub auto_check_updates: bool,
 }
 
 impl Default for Config {
@@ -56,6 +58,7 @@ impl Default for Config {
             logo_size: DEFAULT_LOGO_SIZE,
             dev_tab: false,
             lock_window_size: true,
+            auto_check_updates: true,
         }
     }
 }
@@ -91,6 +94,11 @@ impl Config {
     }
 
     pub fn reset_dev(&mut self) {
+        self.reset_window_settings();
+        self.auto_check_updates = true;
+    }
+
+    fn reset_window_settings(&mut self) {
         self.settings_width = DEFAULT_SETTINGS_WIDTH;
         self.settings_height = DEFAULT_SETTINGS_HEIGHT;
         self.logo_size = DEFAULT_LOGO_SIZE;
@@ -114,7 +122,7 @@ impl Config {
         self.legacy_history_enabled = None;
         self.history_hidden = defaults.history_hidden;
         self.history_count = defaults.history_count;
-        self.reset_dev();
+        self.reset_window_settings();
         self.dev_tab = false;
     }
 
@@ -256,14 +264,22 @@ mod tests {
     fn dev_settings_round_trip_and_resets_preserve_device_and_notification_data() {
         let mut config: Config = serde_json::from_str("{}").unwrap();
         let json = serde_json::to_string(&config).unwrap();
-        for key in ["settings_width", "settings_height", "logo_size", "dev_tab"] {
+        for key in [
+            "settings_width",
+            "settings_height",
+            "logo_size",
+            "dev_tab",
+            "auto_check_updates",
+        ] {
             assert!(!json.contains(key));
         }
+        assert!(config.auto_check_updates);
         config.settings_width = 10;
         config.settings_height = 5000;
         config.logo_size = 1;
         config.dev_tab = true;
         config.lock_window_size = false;
+        config.auto_check_updates = false;
         config.theme = "dark".into();
         config.language = "Russian".into();
         config.panel_width = 450;
@@ -288,10 +304,12 @@ mod tests {
         );
         assert!(restored.dev_tab);
         assert!(!restored.lock_window_size);
+        assert!(!restored.auto_check_updates);
         assert!(restored.record_window_size(800, 700));
         assert!(!restored.record_window_size(800, 700));
         restored.reset_dev();
         assert!(restored.lock_window_size);
+        assert!(restored.auto_check_updates);
         assert!(!restored.record_window_size(900, 800));
         assert!(restored.dev_tab);
         assert_eq!(restored.theme, "dark");
@@ -304,7 +322,9 @@ mod tests {
             ),
             (600, 630, 69)
         );
+        restored.auto_check_updates = false;
         restored.reset_appearance();
+        assert!(!restored.auto_check_updates);
         assert!(!restored.dev_tab);
         assert!(restored.theme.is_empty() && restored.language.is_empty());
         assert_eq!(restored.panel_width, 300);

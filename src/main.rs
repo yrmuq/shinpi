@@ -424,6 +424,14 @@ fn ensure_settings(
         let _ = tx.send(Command::CheckUpdate);
     });
     let tx = sender.clone();
+    settings.on_about_opened(move || {
+        let _ = tx.send(Command::AboutOpened);
+    });
+    let tx = sender.clone();
+    settings.on_auto_check_updates_changed(move |enabled| {
+        let _ = tx.send(Command::AutoCheckUpdates(enabled));
+    });
+    let tx = sender.clone();
     settings.on_open_link(move |url| {
         let _ = tx.send(Command::OpenLink(url.to_string()));
     });
@@ -564,6 +572,7 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_logo_size(cfg.logo_size as i32);
         settings.set_lock_window_size(cfg.lock_window_size);
         settings.set_dev_open(cfg.dev_tab);
+        settings.set_auto_check_updates(cfg.auto_check_updates);
         if cfg.dev_tab {
             let mut names = vec!["configure", "window-pin"];
             for device in &cfg.devices {
@@ -1124,8 +1133,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             redraw = true;
                         }
                     }
-                    Command::CheckUpdate => {
-                        if !matches!(data.borrow().update, updates::Status::Checking) {
+                    Command::CheckUpdate | Command::AboutOpened => {
+                        let automatic = matches!(command, Command::AboutOpened);
+                        let allowed = {
+                            let state = data.borrow();
+                            state
+                                .update
+                                .can_check(automatic, state.config.auto_check_updates)
+                        };
+                        if allowed {
                             data.borrow_mut().update = updates::Status::Checking;
                             redraw = true;
                             let tx = update_tx.clone();
@@ -1150,8 +1166,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state.config.dev_tab = !state.config.dev_tab;
                             if !state.config.dev_tab {
                                 if let Some(settings) = &windows.settings {
-                                    if settings.get_tab_index() == 4 {
-                                        settings.set_tab_index(3);
+                                    if settings.get_tab_index() == 3 {
+                                        settings.set_tab_index(2);
                                     }
                                 }
                             }
@@ -1187,6 +1203,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state.config.lock_window_size = locked;
                         LOCK_WINDOW_SIZE.set(locked);
                         resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::AutoCheckUpdates(enabled) => {
+                        data.borrow_mut().config.auto_check_updates = enabled;
                         changed = true;
                     }
                     Command::SettingsResized(width, height) => {

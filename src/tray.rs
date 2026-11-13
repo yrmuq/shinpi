@@ -8,6 +8,8 @@ pub enum Command {
     Settings,
     Quit,
     CheckUpdate,
+    AboutOpened,
+    AutoCheckUpdates(bool),
     OpenLink(String),
     LogoTapped,
     Metrics(u32, u32, u32),

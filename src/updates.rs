@@ -11,6 +11,12 @@ pub enum Status {
     Failed,
 }
 
+impl Status {
+    pub fn can_check(&self, automatic: bool, enabled: bool) -> bool {
+        !matches!(self, Self::Checking) && (!automatic || enabled)
+    }
+}
+
 #[derive(Deserialize)]
 struct Release {
     tag_name: String,
@@ -98,6 +104,26 @@ pub async fn open_link(url: &str) -> Result<(), zbus::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_auto_checks_still_allow_manual_checks_and_never_duplicate_requests() {
+        for status in [
+            Status::Idle,
+            Status::Current,
+            Status::Failed,
+            Status::Available("v1.0.0".into()),
+        ] {
+            assert!(!status.can_check(true, false));
+            assert!(status.can_check(true, true));
+            assert!(status.can_check(false, false));
+            assert!(status.can_check(false, true));
+        }
+        for automatic in [false, true] {
+            for enabled in [false, true] {
+                assert!(!Status::Checking.can_check(automatic, enabled));
+            }
+        }
+    }
 
     #[test]
     fn links_are_limited_to_the_application_and_readme_upstreams() {
