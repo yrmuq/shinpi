@@ -942,7 +942,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
             if matches!(
-                tokio::time::timeout(Duration::from_secs(30), refresh_rx.recv()).await,
+                tokio::time::timeout(Duration::from_secs(60), refresh_rx.recv()).await,
                 Ok(None)
             ) {
                 break;
