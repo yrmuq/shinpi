@@ -41,10 +41,11 @@
 | Left-click on tray | Toggle the device panel and refresh readings when opening. |
 | Right-click on tray | Open the Refresh, Settings and Quit menu. |
 | Gear icon | Open settings. |
+| Icon theme in General → Appearance | Choose `Colored` or `Monochrome` for the tray battery icon. |
 | `Add` | Choose a discovered device to display. |
 | Pencil in Settings | Change a device's name and icon. |
 | Red `×` in Settings | Remove a device from the panel. |
-| Diagnostics in Settings → Devices | Open source and access diagnostics. |
+| Diagnostics in Settings → Devices | View source, access and notification errors in separate cards; close with the top-right `×`. |
 | Open About | Check the latest stable version automatically when enabled; otherwise use `Check for updates` beside the version. Open the release page when an update is available. |
 | Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size, resize lock and Dev visibility are saved automatically. |
 | Lock window resizing in Dev | Prevent manual window resizing (enabled by default). Unlocked settings window dimensions are saved when resized. |
@@ -66,6 +67,8 @@
 The empty panel's `Add` button disappears after selecting a device; further devices are added through Settings. Sources are listed separately, so choose the source that works best for each device.
 
 Discrete battery levels are displayed as estimates: Critical `10%`, Low `25%`, Normal `50%`, High `75%`, Full `100%`. These estimates use the same color scale and notification threshold as numeric readings.
+
+Changing the notification toggle, threshold or repeat interval requests a fresh reading immediately. The threshold includes equality; a `20%` reading qualifies at a `20%` threshold. Notifications require a current reading from the selected source and pause while charging.
 
 </details>
 

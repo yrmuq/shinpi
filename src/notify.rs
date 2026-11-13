@@ -79,6 +79,36 @@ mod tests {
     use super::*;
     use crate::device::{Device, Kind};
     #[test]
+    fn changed_rules_notify_at_twenty_percent_and_repeat_after_one_minute() {
+        let catalog = crate::i18n::Catalog::load("English");
+        let mut headset = Device::new(
+            "headset".into(),
+            "Headphones".into(),
+            Kind::Headset,
+            "BlueZ",
+        );
+        headset.reading.percent = Some(20);
+        let mut scan = Scan {
+            devices: vec![headset],
+            warnings: vec![],
+        };
+        let mut config = Config::default();
+        config.add(&scan.devices[0]);
+        assert!(due(&config, &scan, 10000, &catalog).is_empty());
+        config.low_threshold = 20;
+        config.repeat_minutes = 1;
+        let first = due(&config, &scan, 10000, &catalog);
+        assert_eq!(first.len(), 1);
+        assert!(first[0].1.contains("20%"));
+        config.devices[0].last_notified = 10000;
+        assert!(due(&config, &scan, 10059, &catalog).is_empty());
+        assert_eq!(due(&config, &scan, 10060, &catalog).len(), 1);
+        assert!(due(&config, &Scan::default(), 10060, &catalog).is_empty());
+        scan.devices[0].reading.charging = true;
+        assert!(due(&config, &scan, 10060, &catalog).is_empty());
+    }
+
+    #[test]
     fn common_interval_and_threshold_include_estimates_and_suppress_stale_and_charging() {
         let catalog = crate::i18n::Catalog::load("Russian");
         let mut percent = Device::new("one".into(), "Mouse".into(), Kind::Mouse, "HID");

@@ -48,7 +48,7 @@ struct State {
 
 enum Event {
     Started,
-    Scanned(device::Scan),
+    Scanned(device::Scan, u64),
     UpdateChecked(Result<Option<String>, ()>),
     LinkOpened(Result<(), String>),
     Notified(String, u64, String, Result<(), String>),
@@ -649,7 +649,7 @@ fn paint(shell: &Shell, state: &State) {
             _ => 0,
         });
         settings.set_orientation(i32::from(cfg.tray_orientation));
-        settings.set_colored(cfg.colored_icon);
+        settings.set_icon_theme(if cfg.colored_icon { 0 } else { 1 });
         settings.set_notifications(cfg.notifications);
         settings.set_threshold(i32::from(cfg.low_threshold));
         settings.set_repeat_minutes(cfg.repeat_minutes as i32);
@@ -785,11 +785,15 @@ fn fill(shell: &Shell, state: &State) {
     if !state.notification_error.is_empty() {
         diagnostics.push(state.catalog.message(&state.notification_error));
     }
-    settings.set_diagnostics(if diagnostics.is_empty() {
-        state.catalog.tr("All sources have been scanned.").into()
-    } else {
-        diagnostics.join("\n\n").into()
-    });
+    if diagnostics.is_empty() {
+        diagnostics.push(state.catalog.tr("All sources have been scanned."));
+    }
+    settings.set_diagnostics(ModelRc::new(VecModel::from(
+        diagnostics
+            .into_iter()
+            .map(slint::SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
 }
 
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
@@ -938,7 +942,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
             let result = scan().await;
-            if results_tx.send(Event::Scanned(result)).is_err() {
+            // UI queue latency must not push minute repeats past the next scan.
+            let observed_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if results_tx
+                .send(Event::Scanned(result, observed_at))
+                .is_err()
+            {
                 break;
             }
             if matches!(
@@ -1100,16 +1112,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         data.borrow_mut().config.colored_icon = value;
                         changed = true;
                     }
-                    Command::Notifications(value) => {
-                        data.borrow_mut().config.notifications = value;
-                        changed = true;
-                    }
-                    Command::Threshold(value) => {
-                        data.borrow_mut().config.low_threshold = value.min(100);
-                        changed = true;
-                    }
-                    Command::Repeat(value) => {
-                        data.borrow_mut().config.repeat_minutes = value.clamp(1, 10080);
+                    Command::Notifications(_) | Command::Threshold(_) | Command::Repeat(_) => {
+                        let mut state = data.borrow_mut();
+                        match command {
+                            Command::Notifications(value) => state.config.notifications = value,
+                            Command::Threshold(value) => {
+                                state.config.low_threshold = value.min(100)
+                            }
+                            Command::Repeat(value) => {
+                                state.config.repeat_minutes = value.clamp(1, 10080)
+                            }
+                            _ => unreachable!(),
+                        }
+                        if !state.busy {
+                            state.busy = true;
+                            let _ = refresh.send(());
+                        }
                         changed = true;
                     }
                     Command::PanelWidth(value) => {
@@ -1239,15 +1257,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Event::Started => state.busy = true,
-                    Event::Scanned(result) => {
+                    Event::Scanned(result, observed_at) => {
                         state.busy = false;
                         changed |= state.config.observe(&result);
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
                         for (id, message) in
-                            notify::due(&state.config, &result, now, &state.catalog)
+                            notify::due(&state.config, &result, observed_at, &state.catalog)
                         {
                             if state.pending_notifications.insert(id.clone()) {
                                 let tx = notification_tx.clone();
@@ -1256,7 +1270,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     let result = notify::send(&title, &message)
                                         .await
                                         .map_err(|e| e.to_string());
-                                    let _ = tx.send(Event::Notified(id, now, message, result));
+                                    let _ =
+                                        tx.send(Event::Notified(id, observed_at, message, result));
                                 });
                             }
                         }

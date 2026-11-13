@@ -552,7 +552,7 @@ export component Settings inherits Window {
     in-out property <[DeviceRow]> rows;
     in-out property <int> theme-index;
     in-out property <int> orientation;
-    in-out property <bool> colored: true;
+    in-out property <int> icon-theme;
     in-out property <int> panel-width: 300;
     in-out property <int> history-count: 3;
     callback panel-width-selected(int);
@@ -561,7 +561,7 @@ export component Settings inherits Window {
     in-out property <int> threshold: 15;
     in-out property <int> repeat-minutes: 60;
     in-out property <image> tray-preview;
-    in-out property <string> diagnostics;
+    in-out property <[string]> diagnostics;
     in-out property <string> error;
     in-out property <[string]> language-names;
     in-out property <int> language-index;
@@ -639,23 +639,29 @@ export component Settings inherits Window {
             VerticalLayout {
                 padding: 16px;
                 spacing: 12px;
-                Text { text: Translations.tr(50); color: Breeze.fg; font-weight: 600; }
+                HorizontalLayout {
+                    Text { text: Translations.tr(50); color: Breeze.fg; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                    ToolButton {
+                        flat: true; label: Translations.tr(15);
+                        clicked => { diagnostics-dialog.close(); }
+                        Text { text: "×"; font-size: 22px; color: Breeze.fg; }
+                    }
+                }
                 diagnostics-scroll := ScrollView {
                     content-width: self.visible-width;
                     VerticalLayout {
                         padding: 8px;
-                        alignment: start;
-                        Text {
-                            min-width: 0px;
-                            text: root.diagnostics;
-                            color: Breeze.fg;
-                            wrap: word-wrap;
+                        alignment: start; spacing: 8px;
+                        for message in root.diagnostics: Rectangle {
+                            border-radius: Breeze.radius;
+                            border-width: 1px; border-color: Breeze.frame;
+                            background: Breeze.button;
+                            VerticalLayout {
+                                padding: 10px;
+                                Text { min-width: 0px; text: message; color: Breeze.fg; wrap: word-wrap; }
+                            }
                         }
                     }
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    Button { text: Translations.tr(15); clicked => { diagnostics-dialog.close(); } }
                 }
             }
         }
@@ -707,11 +713,11 @@ export component Settings inherits Window {
                     }
                     SettingRow {
                         label-width: Math.min(260px, (root.settings-width - 48) * 0.45px);
-                        label: Translations.tr(35);
-                        CheckBox {
-                            accessible-label: Translations.tr(35);
-                            checked <=> root.colored;
-                            toggled => { root.colored-selected(self.checked); }
+                        label: Translations.tr(127);
+                        ComboBox {
+                            model: [Translations.tr(128), Translations.tr(129)];
+                            current-index <=> root.icon-theme;
+                            selected(value) => { root.colored-selected(self.current-index == 0); }
                         }
                     }
                     SettingRow {
@@ -793,52 +799,62 @@ export component Settings inherits Window {
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
-            if root.tab-index == 2: ScrollView {
+            if root.tab-index == 2: about-scroll := ScrollView {
                 content-width: self.visible-width;
                 VerticalLayout {
-                    padding-left: 23px; padding-right: 23px;
-                    padding-top: 23px; padding-bottom: 12px;
-                    spacing: 8px; alignment: start;
+                    min-height: about-scroll.visible-height;
+                    padding: 23px;
+                    spacing: 8px;
                     HorizontalLayout {
-                        alignment: center;
-                        ToolButton {
-                            width: root.logo-size * 1px; height: root.logo-size * 1px;
-                            flat: true; label: "shinpi";
-                            clicked => { root.logo-tapped(); }
-                            Image { source: @image-url("../assets/icon.svg"); width: 100%; height: 100%; image-fit: contain; }
+                        spacing: 20px;
+                        VerticalLayout {
+                            width: Math.max(root.logo-size * 1px, 110px);
+                            alignment: center; spacing: 8px;
+                            HorizontalLayout {
+                                alignment: center;
+                                ToolButton {
+                                    width: root.logo-size * 1px; height: root.logo-size * 1px;
+                                    flat: true; label: "shinpi";
+                                    clicked => { root.logo-tapped(); }
+                                    Image { source: @image-url("../assets/icon.svg"); width: 100%; height: 100%; image-fit: contain; }
+                                }
+                            }
+                            Text { text: "shinpi"; font-size: 16px; font-weight: 700; color: Breeze.fg; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            alignment: center; spacing: 8px; horizontal-stretch: 1;
+                            HorizontalLayout {
+                                alignment: start; spacing: 6px;
+                                Text { text: Translations.tr(95) + ":"; color: Breeze.fg; vertical-alignment: center; }
+                                AboutLink { label: "github"; activate => { root.open-link("https://github.com/yrmuq/shinpi"); } }
+                            }
+                            HorizontalLayout {
+                                alignment: start; spacing: 6px;
+                                Text { text: Translations.tr(114); color: Breeze.fg; vertical-alignment: center; }
+                                AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                                if !root.auto-check-updates: Button {
+                                    text: Translations.tr(97);
+                                    enabled: !root.checking-update;
+                                    clicked => { root.check-update(); }
+                                }
+                            }
+                            if root.update-status != "": Text {
+                                text: root.update-status; wrap: word-wrap;
+                                color: root.update-current ? #27ae60 : Breeze.fg;
+                            }
+                            if root.update-available: HorizontalLayout {
+                                alignment: start;
+                                Button { text: Translations.tr(98); clicked => { root.open-link("https://github.com/yrmuq/shinpi/releases/latest"); } }
+                            }
                         }
                     }
-                    Text { text: "shinpi"; font-size: 16px; font-weight: 700; color: Breeze.fg; horizontal-alignment: center; }
-                    HorizontalLayout {
-                        alignment: start; spacing: 6px;
-                        Text { text: Translations.tr(95) + ":"; color: Breeze.fg; vertical-alignment: center; }
-                        AboutLink { label: "github"; activate => { root.open-link("https://github.com/yrmuq/shinpi"); } }
-                    }
-                    HorizontalLayout {
-                        alignment: start; spacing: 6px;
-                        Text { text: Translations.tr(114); color: Breeze.fg; vertical-alignment: center; }
-                        AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
-                    }
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; vertical-alignment: center; horizontal-stretch: 1; }
-                        if !root.auto-check-updates: Button {
-                            text: Translations.tr(97);
-                            enabled: !root.checking-update;
-                            clicked => { root.check-update(); }
-                        }
-                    }
-                    if root.update-status != "": Text {
-                        text: root.update-status; wrap: word-wrap;
-                        color: root.update-current ? #27ae60 : Breeze.fg;
-                    }
-                    if root.update-available: HorizontalLayout {
-                        alignment: start;
-                        Button { text: Translations.tr(98); clicked => { root.open-link("https://github.com/yrmuq/shinpi/releases/latest"); } }
-                    }
-                    Rectangle { height: root.ui-font-size * 2; background: transparent; }
+                    Rectangle { min-height: root.ui-font-size * 2; vertical-stretch: 1; background: transparent; }
                     ScrollView {
-                        height: parts-table.preferred-height + 14px;
+                        height: parts-table.preferred-height + (self.visible-width < 520px ? 14px : 0px);
                         vertical-scrollbar-policy: always-off;
                         content-width: Math.max(self.visible-width, 520px);
                         content-height: parts-table.preferred-height;
