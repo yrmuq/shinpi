@@ -1,3 +1,4 @@
+mod about;
 mod config;
 mod device;
 mod hid;
@@ -13,7 +14,7 @@ mod updates;
 
 use slint::{
     winit_030::{winit, EventResult, WinitWindowAccessor},
-    ComponentHandle, ModelRc, VecModel,
+    ComponentHandle, Model, ModelRc, VecModel,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -41,15 +42,19 @@ struct State {
     editing: Option<String>,
     pending_notifications: HashSet<String>,
     notification_error: String,
+    notification_test: Option<Result<u32, String>>,
+    testing_notification: bool,
     update: updates::Status,
+    logo_taps: about::LogoTaps,
 }
 
 enum Event {
     Started,
-    Scanned(device::Scan),
+    Scanned(device::Scan, u64),
     UpdateChecked(Result<Option<String>, ()>),
     LinkOpened(Result<(), String>),
     Notified(String, u64, String, Result<(), String>),
+    NotificationTested(Result<u32, String>),
 }
 
 async fn scan() -> device::Scan {
@@ -100,40 +105,10 @@ struct Shell {
 
 thread_local! {
     static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") };
-    static POPUP_CLASS_HELD: Cell<bool> = const { Cell::new(false) };
+    static LOCK_WINDOW_SIZE: Cell<bool> = const { Cell::new(true) };
 }
 
 const POPUP_CLASS: &str = "shinpi-popup";
-
-/// Wayland destroys a hidden popup and maps the next one before its title exists.
-/// Hold a dedicated application id until that window exists so KWin skips the taskbar.
-fn hold_popup_class() {
-    if POPUP_CLASS_HELD.replace(true) {
-        return;
-    }
-    let _ = slint::set_xdg_app_id(POPUP_CLASS);
-}
-
-fn release_popup_class(shell: &Shell) {
-    if !POPUP_CLASS_HELD.get() {
-        return;
-    }
-    let pending =
-        |window: &slint::Window| window.is_visible() && window.with_winit_window(|_| ()).is_none();
-    if shell
-        .popup
-        .as_ref()
-        .is_some_and(|popup| pending(popup.window()))
-        || shell
-            .notices
-            .as_ref()
-            .is_some_and(|notices| pending(notices.window()))
-    {
-        return;
-    }
-    POPUP_CLASS_HELD.set(false);
-    let _ = slint::set_xdg_app_id("shinpi");
-}
 
 fn window_attributes(
     attributes: winit::window::WindowAttributes,
@@ -142,9 +117,13 @@ fn window_attributes(
     use winit::platform::x11::{WindowAttributesExtX11, WindowType};
     let popup = !panel.is_empty();
     let attributes = attributes
-        .with_resizable(false)
+        .with_resizable(!LOCK_WINDOW_SIZE.get())
         .with_transparent(popup)
         .with_title(if popup { panel } else { "shinpi" });
+    let class = if popup { POPUP_CLASS } else { "shinpi" };
+    let attributes = WindowAttributesExtX11::with_name(attributes, class, class);
+    let attributes =
+        winit::platform::wayland::WindowAttributesExtWayland::with_name(attributes, class, class);
     if popup {
         attributes.with_x11_window_type(vec![WindowType::PopupMenu])
     } else {
@@ -157,10 +136,17 @@ fn ensure_popup(
     state: &Rc<RefCell<State>>,
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Popup> {
-    if let Some(popup) = &shell.popup {
-        return Some(popup.clone_strong());
-    }
-    hold_popup_class();
+    let pinned = if let Some(popup) = &shell.popup {
+        if popup.window().is_visible() {
+            return Some(popup.clone_strong());
+        }
+        popup.get_pinned()
+    } else {
+        false
+    };
+    // Slint 1.18 discards native attributes on Wayland hide; recreate the panel adapter.
+    shell.notices = None;
+    shell.popup = None;
     CREATING_PANEL.set("shinpi-devices");
     let result = Popup::new();
     if let Ok(popup) = &result {
@@ -168,6 +154,7 @@ fn ensure_popup(
     }
     CREATING_PANEL.set("");
     let popup = result.map_err(|e| eprintln!("shinpi: popup: {e}")).ok()?;
+    popup.set_pinned(pinned);
     let tx = sender.clone();
     popup.on_configure(move || {
         let _ = tx.send(Command::Settings);
@@ -246,10 +233,12 @@ fn ensure_notices(
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Notices> {
     if let Some(notices) = &shell.notices {
-        return Some(notices.clone_strong());
+        if notices.window().is_visible() {
+            return Some(notices.clone_strong());
+        }
     }
+    shell.notices = None;
     let popup = shell.popup.as_ref()?;
-    hold_popup_class();
     CREATING_PANEL.set("shinpi-notices");
     let result = Notices::new();
     if let Ok(notices) = &result {
@@ -278,7 +267,7 @@ fn sync_notices(
             .as_ref()
             .is_some_and(|p| p.window().is_visible())
             && !state.closing
-            && state.config.history_enabled
+            && state.config.history_count > 0
             && !state.config.history_hidden
             && !state.config.history.is_empty()
     };
@@ -298,7 +287,10 @@ fn sync_notices(
         }
         return;
     }
-    let fresh = shell.notices.is_none();
+    let fresh = shell
+        .notices
+        .as_ref()
+        .is_none_or(|notices| !notices.window().is_visible());
     let Some(notices) = ensure_notices(shell, state, sender) else {
         return;
     };
@@ -307,7 +299,6 @@ fn sync_notices(
         fill(shell, &state.borrow());
     }
     if !notices.window().is_visible() {
-        hold_popup_class();
         notices.set_expanded(false);
         let _ = notices.get_slide();
         let _ = notices.show();
@@ -357,9 +348,15 @@ fn ensure_settings(
     shell: &mut Shell,
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Settings> {
-    if let Some(settings) = &shell.settings {
-        return Some(settings.clone_strong());
-    }
+    let tab = if let Some(settings) = &shell.settings {
+        if settings.window().is_visible() {
+            return Some(settings.clone_strong());
+        }
+        settings.get_tab_index()
+    } else {
+        0
+    };
+    shell.settings = None;
     let settings = Settings::new()
         .map_err(|e| eprintln!("shinpi: settings: {e}"))
         .ok()?;
@@ -421,10 +418,6 @@ fn ensure_settings(
         let _ = tx.send(Command::PanelWidth(value as u32));
     });
     let tx = sender.clone();
-    settings.on_history_enabled_selected(move |value| {
-        let _ = tx.send(Command::HistoryEnabled(value));
-    });
-    let tx = sender.clone();
     settings.on_history_count_selected(move |value| {
         let _ = tx.send(Command::HistoryCount(value as u32));
     });
@@ -434,16 +427,72 @@ fn ensure_settings(
         let _ = tx.send(Command::CheckUpdate);
     });
     let tx = sender.clone();
-    settings.on_open_link(move |index| {
-        let _ = tx.send(Command::OpenLink(index));
+    settings.on_test_notification(move || {
+        let _ = tx.send(Command::TestNotification);
     });
+    let tx = sender.clone();
+    settings.on_about_opened(move || {
+        let _ = tx.send(Command::AboutOpened);
+    });
+    let tx = sender.clone();
+    settings.on_auto_check_updates_changed(move |enabled| {
+        let _ = tx.send(Command::AutoCheckUpdates(enabled));
+    });
+    let tx = sender.clone();
+    settings.on_open_link(move |url| {
+        let _ = tx.send(Command::OpenLink(url.to_string()));
+    });
+    let tx = sender.clone();
+    settings.on_logo_tapped(move || {
+        let _ = tx.send(Command::LogoTapped);
+    });
+    let tx = sender.clone();
+    settings.on_metrics_changed(move |width, height, logo| {
+        let _ = tx.send(Command::Metrics(
+            width.max(0) as u32,
+            height.max(0) as u32,
+            logo.max(0) as u32,
+        ));
+    });
+    let tx = sender.clone();
+    settings.on_reset_appearance(move || {
+        let _ = tx.send(Command::ResetAppearance);
+    });
+    let tx = sender.clone();
+    settings.on_reset_dev(move || {
+        let _ = tx.send(Command::ResetDev);
+    });
+    let tx = sender.clone();
+    settings.on_lock_window_size_changed(move |locked| {
+        let _ = tx.send(Command::LockWindowSize(locked));
+    });
+    let tx = sender.clone();
     let weak = settings.as_weak();
-    settings.on_dismiss(move || {
-        if let Some(settings) = weak.upgrade() {
-            settings.invoke_close_dialogs();
-            let _ = settings.hide();
-        }
-    });
+    settings
+        .window()
+        .on_winit_window_event(move |window, event| {
+            if let winit::event::WindowEvent::MouseWheel { delta, .. } = event {
+                // Route wheel input to views before standard widgets can edit their values.
+                if let Some(settings) = weak.upgrade() {
+                    let (x, y) = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(x, y) => (*x * 60.0, *y * 60.0),
+                        winit::event::MouseScrollDelta::PixelDelta(delta) => {
+                            let delta = delta.to_logical::<f32>(f64::from(window.scale_factor()));
+                            (delta.x, delta.y)
+                        }
+                    };
+                    settings.invoke_scroll_settings(x, y);
+                }
+                return EventResult::PreventDefault;
+            }
+            if let winit::event::WindowEvent::Resized(size) = event {
+                if window.is_visible() && !LOCK_WINDOW_SIZE.get() {
+                    let size = size.to_logical::<u32>(f64::from(window.scale_factor()));
+                    let _ = tx.send(Command::SettingsResized(size.width, size.height));
+                }
+            }
+            EventResult::Propagate
+        });
     let weak = settings.as_weak();
     settings.window().on_close_requested(move || {
         if let Some(settings) = weak.upgrade() {
@@ -451,8 +500,40 @@ fn ensure_settings(
         }
         slint::CloseRequestResponse::HideWindow
     });
+    settings.set_tab_index(tab);
     shell.settings = Some(settings.clone_strong());
     Some(settings)
+}
+
+fn resize_settings(shell: &Shell, config: &config::Config) {
+    if let Some(settings) = &shell.settings {
+        settings.set_settings_width(config.settings_width as i32);
+        settings.set_settings_height(config.settings_height as i32);
+        settings.set_logo_size(config.logo_size as i32);
+        settings.set_lock_window_size(config.lock_window_size);
+        let _ = settings.window().with_winit_window(|window| {
+            window.set_min_inner_size(None::<winit::dpi::LogicalSize<f64>>);
+            window.set_max_inner_size(None::<winit::dpi::LogicalSize<f64>>);
+        });
+        settings.window().set_size(slint::LogicalSize::new(
+            config.settings_width as f32,
+            config.settings_height as f32,
+        ));
+        let _ = settings.window().with_winit_window(|window| {
+            let (minimum, maximum) = if config.lock_window_size {
+                let size =
+                    winit::dpi::LogicalSize::new(config.settings_width, config.settings_height);
+                (size, size)
+            } else {
+                (
+                    winit::dpi::LogicalSize::new(360, 240),
+                    winit::dpi::LogicalSize::new(2200, 1800),
+                )
+            };
+            window.set_min_inner_size(Some(minimum));
+            window.set_max_inner_size(Some(maximum));
+        });
+    }
 }
 
 fn paint(shell: &Shell, state: &State) {
@@ -468,9 +549,14 @@ fn paint(shell: &Shell, state: &State) {
             window.global::<Translations>().set_strings(labels.clone());
             window.set_dark(dark);
             window.set_ui_font_family(font.family.clone().into());
-            let scale = window.window().scale_factor().max(1.0);
-            window.set_ui_font_size((font.size_px * scale).round() / scale);
+            // Slint applies DPI scaling; rounding before mapping changed the font on the next repaint.
+            window.set_ui_font_size(font.size_px);
             window.set_ui_font_weight(font.weight);
+            let _ = window.window().with_winit_window(|native| {
+                if native.is_resizable() == cfg.lock_window_size {
+                    native.set_resizable(!cfg.lock_window_size);
+                }
+            });
             let breeze = window.global::<Breeze>();
             breeze.set_window(color(palette.window));
             breeze.set_button(color(palette.button));
@@ -486,7 +572,7 @@ fn paint(shell: &Shell, state: &State) {
     if let Some(popup) = &shell.popup {
         window_style!(popup);
         popup.set_panel_width(cfg.panel_width as i32);
-        popup.set_history_enabled(cfg.history_enabled);
+        popup.set_history_enabled(cfg.history_count > 0);
         popup.set_history_hidden(cfg.history_hidden);
         if let Some(icon) = icons::theme_icon("configure") {
             popup.set_icon_configure(icon.image);
@@ -503,7 +589,68 @@ fn paint(shell: &Shell, state: &State) {
     }
     if let Some(settings) = &shell.settings {
         window_style!(settings);
+        settings.set_settings_width(cfg.settings_width as i32);
+        settings.set_settings_height(cfg.settings_height as i32);
+        settings.set_logo_size(cfg.logo_size as i32);
+        settings.set_lock_window_size(cfg.lock_window_size);
+        settings.set_dev_open(cfg.dev_tab);
+        settings.set_auto_check_updates(cfg.auto_check_updates);
+        settings.set_testing_notification(state.testing_notification);
+        settings.set_notification_test_failed(matches!(state.notification_test, Some(Err(_))));
+        settings.set_notification_test_status(if state.testing_notification {
+            catalog.tr("Sending a test notification…")
+        } else {
+            match &state.notification_test {
+                None => String::new(),
+                Some(Ok(id)) => catalog.trf("The system accepted notification ID {}. If no popup appeared, check Do Not Disturb and shinpi notification permissions in KDE.", &[&id.to_string()]),
+                Some(Err(error)) => catalog.trf("Notifications unavailable: {}", &[error]),
+            }
+        }.into());
+        if cfg.dev_tab {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let mut report = notify::diagnostics(cfg, &state.scan, now, catalog);
+            if !state.notification_error.is_empty() {
+                report.push_str("\n\n");
+                report.push_str(&catalog.message(&state.notification_error));
+            }
+            settings.set_notification_report(report.into());
+            let mut names = vec!["configure", "window-pin"];
+            for device in &cfg.devices {
+                if !names.contains(&device.kind.icon()) {
+                    names.push(device.kind.icon());
+                }
+            }
+            settings.set_dev_report(
+                names
+                    .into_iter()
+                    .map(|name| {
+                        format!(
+                            "{name}: {}",
+                            icons::source_format(name).unwrap_or_else(|| catalog.tr("Bundled"))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .into(),
+            );
+        }
+        let parts: Vec<_> = about::parts()
+            .into_iter()
+            .map(|part| Attribution {
+                name: part.name.into(),
+                upstream: part.upstream.into(),
+                detail: catalog.tr(&part.detail).into(),
+                url: part.url.into(),
+            })
+            .collect();
+        if !settings.get_parts().iter().eq(parts.iter().cloned()) {
+            settings.set_parts(ModelRc::new(VecModel::from(parts)));
+        }
         settings.set_version(env!("CARGO_PKG_VERSION").into());
+        settings.set_update_current(matches!(state.update, updates::Status::Current));
         settings.set_checking_update(matches!(state.update, updates::Status::Checking));
         settings.set_update_available(matches!(state.update, updates::Status::Available(_)));
         settings.set_update_status(
@@ -521,7 +668,6 @@ fn paint(shell: &Shell, state: &State) {
             .into(),
         );
         settings.set_panel_width(cfg.panel_width as i32);
-        settings.set_history_enabled(cfg.history_enabled);
         settings.set_history_count(cfg.history_count as i32);
         let languages = i18n::languages();
         let mut names = vec![catalog.tr("System language").into()];
@@ -546,7 +692,7 @@ fn paint(shell: &Shell, state: &State) {
             _ => 0,
         });
         settings.set_orientation(i32::from(cfg.tray_orientation));
-        settings.set_colored(cfg.colored_icon);
+        settings.set_icon_theme(if cfg.colored_icon { 0 } else { 1 });
         settings.set_notifications(cfg.notifications);
         settings.set_threshold(i32::from(cfg.low_threshold));
         settings.set_repeat_minutes(cfg.repeat_minutes as i32);
@@ -583,12 +729,26 @@ fn row(
     };
     DeviceRow {
         name: name.into(),
-        charge: catalog.reading(reading).into(),
+        charge: if reading.charging {
+            reading
+                .percentage()
+                .map(|p| format!("{p}%"))
+                .unwrap_or_else(|| catalog.reading(reading))
+        } else {
+            catalog.reading(reading)
+        }
+        .into(),
         detail: source.into(),
         icon,
         tint,
-        low: reading.low(15),
+        charge_color: reading
+            .band()
+            .map(icons::charge_color)
+            .map(color)
+            .unwrap_or_default(),
+        has_percent: reading.percentage().is_some(),
         added,
+        charging: reading.charging,
     }
 }
 
@@ -677,24 +837,27 @@ fn fill(shell: &Shell, state: &State) {
     if !state.notification_error.is_empty() {
         diagnostics.push(state.catalog.message(&state.notification_error));
     }
-    settings.set_diagnostics(if diagnostics.is_empty() {
-        state.catalog.tr("All sources have been scanned.").into()
-    } else {
-        diagnostics.join("\n\n").into()
-    });
+    if diagnostics.is_empty() {
+        diagnostics.push(state.catalog.tr("All sources have been scanned."));
+    }
+    settings.set_diagnostics(ModelRc::new(VecModel::from(
+        diagnostics
+            .into_iter()
+            .map(slint::SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
 }
 
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
     timer.stop();
     if open {
-        hold_popup_class();
         popup.set_slide(popup.get_layout_height());
         if let Err(e) = popup.show() {
             eprintln!("shinpi: {e}");
             return;
         }
         let _ = popup.window().with_winit_window(|w| {
-            w.set_resizable(false);
+            w.set_title("shinpi-devices");
             w.focus_window();
         });
         let mut state = state.borrow_mut();
@@ -768,12 +931,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let Some(_lock) = single_instance()? else {
         return Ok(());
     };
+    LOCK_WINDOW_SIZE.set(config::load().lock_window_size);
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
         .with_winit_window_attributes_hook(|a| window_attributes(a, CREATING_PANEL.get()))
         .select()?;
-    let _ = slint::set_xdg_app_id("shinpi");
     let shell = Rc::new(RefCell::new(Shell::default()));
     let state = Rc::new(RefCell::new(State {
         config: config::load(),
@@ -789,7 +952,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         editing: None,
         pending_notifications: HashSet::new(),
         notification_error: String::new(),
+        notification_test: None,
+        testing_notification: false,
         update: updates::Status::Idle,
+        logo_taps: about::LogoTaps::default(),
     }));
     let (sender, mut commands) = tokio::sync::mpsc::unbounded_channel();
     let (refresh, mut refresh_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -830,11 +996,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
             let result = scan().await;
-            if results_tx.send(Event::Scanned(result)).is_err() {
+            // UI queue latency must not push minute repeats past the next scan.
+            let observed_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if results_tx
+                .send(Event::Scanned(result, observed_at))
+                .is_err()
+            {
                 break;
             }
             if matches!(
-                tokio::time::timeout(Duration::from_secs(30), refresh_rx.recv()).await,
+                tokio::time::timeout(Duration::from_secs(60), refresh_rx.recv()).await,
                 Ok(None)
             ) {
                 break;
@@ -856,7 +1030,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         slint::TimerMode::Repeated,
         Duration::from_millis(60),
         move || {
-            release_popup_class(&tick_shell.borrow());
             let mut windows = tick_shell.borrow_mut();
             let mut changed = false;
             let mut redraw = false;
@@ -993,28 +1166,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         data.borrow_mut().config.colored_icon = value;
                         changed = true;
                     }
-                    Command::Notifications(value) => {
-                        data.borrow_mut().config.notifications = value;
-                        changed = true;
-                    }
-                    Command::Threshold(value) => {
-                        data.borrow_mut().config.low_threshold = value.min(100);
-                        changed = true;
-                    }
-                    Command::Repeat(value) => {
-                        data.borrow_mut().config.repeat_minutes = value.clamp(1, 10080);
+                    Command::Notifications(_) | Command::Threshold(_) | Command::Repeat(_) => {
+                        let mut state = data.borrow_mut();
+                        match command {
+                            Command::Notifications(value) => state.config.notifications = value,
+                            Command::Threshold(value) => {
+                                state.config.low_threshold = value.min(100)
+                            }
+                            Command::Repeat(value) => {
+                                state.config.repeat_minutes = value.clamp(1, 10080)
+                            }
+                            _ => unreachable!(),
+                        }
+                        if !state.busy {
+                            state.busy = true;
+                            let _ = refresh.send(());
+                        }
                         changed = true;
                     }
                     Command::PanelWidth(value) => {
                         data.borrow_mut().config.panel_width = value.clamp(280, 800);
                         changed = true;
                     }
-                    Command::HistoryEnabled(value) => {
-                        data.borrow_mut().config.history_enabled = value;
-                        changed = true;
-                    }
                     Command::HistoryCount(value) => {
-                        data.borrow_mut().config.history_count = value.clamp(1, 20);
+                        let mut state = data.borrow_mut();
+                        state.config.history_count = value.min(20);
+                        state.config.history_hidden = false;
                         changed = true;
                     }
                     Command::ToggleHistory => {
@@ -1028,8 +1205,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             redraw = true;
                         }
                     }
-                    Command::CheckUpdate => {
-                        if !matches!(data.borrow().update, updates::Status::Checking) {
+                    Command::TestNotification => {
+                        let mut state = data.borrow_mut();
+                        if !state.testing_notification {
+                            state.testing_notification = true;
+                            redraw = true;
+                            let title = state.catalog.tr("shinpi notification test");
+                            let message = state
+                                .catalog
+                                .tr("This test bypasses battery levels and notification rules.");
+                            let tx = update_tx.clone();
+                            rt_handle.spawn(async move {
+                                let result = notify::send(&title, &message)
+                                    .await
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send(Event::NotificationTested(result));
+                            });
+                        }
+                    }
+                    Command::CheckUpdate | Command::AboutOpened => {
+                        let automatic = matches!(command, Command::AboutOpened);
+                        let allowed = {
+                            let state = data.borrow();
+                            state
+                                .update
+                                .can_check(automatic, state.config.auto_check_updates)
+                        };
+                        if allowed {
                             data.borrow_mut().update = updates::Status::Checking;
                             redraw = true;
                             let tx = update_tx.clone();
@@ -1041,12 +1243,64 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             });
                         }
                     }
-                    Command::OpenLink(index) => {
+                    Command::OpenLink(url) => {
                         let tx = update_tx.clone();
                         rt_handle.spawn(async move {
-                            let result = updates::open_link(index).await.map_err(|e| e.to_string());
+                            let result = updates::open_link(&url).await.map_err(|e| e.to_string());
                             let _ = tx.send(Event::LinkOpened(result));
                         });
+                    }
+                    Command::LogoTapped => {
+                        let mut state = data.borrow_mut();
+                        if state.logo_taps.push(Instant::now()) {
+                            state.config.dev_tab = !state.config.dev_tab;
+                            if !state.config.dev_tab {
+                                if let Some(settings) = &windows.settings {
+                                    if settings.get_tab_index() == 3 {
+                                        settings.set_tab_index(2);
+                                    }
+                                }
+                            }
+                            changed = true;
+                        }
+                    }
+                    Command::Metrics(width, height, logo) => {
+                        let mut state = data.borrow_mut();
+                        state.config.settings_width = width;
+                        state.config.settings_height = height;
+                        state.config.logo_size = logo;
+                        state.config.normalize_metrics();
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::ResetAppearance => {
+                        let mut state = data.borrow_mut();
+                        state.config.reset_appearance();
+                        LOCK_WINDOW_SIZE.set(state.config.lock_window_size);
+                        state.catalog = i18n::Catalog::load(&state.config.language);
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::ResetDev => {
+                        let mut state = data.borrow_mut();
+                        state.config.reset_dev();
+                        LOCK_WINDOW_SIZE.set(state.config.lock_window_size);
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::LockWindowSize(locked) => {
+                        let mut state = data.borrow_mut();
+                        state.config.lock_window_size = locked;
+                        LOCK_WINDOW_SIZE.set(locked);
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::AutoCheckUpdates(enabled) => {
+                        data.borrow_mut().config.auto_check_updates = enabled;
+                        changed = true;
+                    }
+                    Command::SettingsResized(width, height) => {
+                        changed |= data.borrow_mut().config.record_window_size(width, height);
                     }
                     Command::Quit => {
                         let _ = slint::quit_event_loop();
@@ -1058,6 +1312,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 redraw = true;
                 let mut state = data.borrow_mut();
                 match event {
+                    Event::NotificationTested(result) => {
+                        state.testing_notification = false;
+                        state.notification_test = Some(result);
+                    }
                     Event::UpdateChecked(result) => {
                         state.update = match result {
                             Ok(Some(version)) => updates::Status::Available(version),
@@ -1075,15 +1333,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Event::Started => state.busy = true,
-                    Event::Scanned(result) => {
+                    Event::Scanned(result, observed_at) => {
                         state.busy = false;
                         changed |= state.config.observe(&result);
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
                         for (id, message) in
-                            notify::due(&state.config, &result, now, &state.catalog)
+                            notify::due(&state.config, &result, observed_at, &state.catalog)
                         {
                             if state.pending_notifications.insert(id.clone()) {
                                 let tx = notification_tx.clone();
@@ -1091,8 +1345,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 rt_handle.spawn(async move {
                                     let result = notify::send(&title, &message)
                                         .await
+                                        .map(|_| ())
                                         .map_err(|e| e.to_string());
-                                    let _ = tx.send(Event::Notified(id, now, message, result));
+                                    let _ =
+                                        tx.send(Event::Notified(id, observed_at, message, result));
                                 });
                             }
                         }
@@ -1234,5 +1490,9 @@ mod window_tests {
         assert!(notices.transparent && !notices.resizable);
         assert!(!popup.resizable && !settings.resizable);
         assert!(popup.transparent && !settings.transparent);
+        LOCK_WINDOW_SIZE.set(false);
+        let unlocked = window_attributes(winit::window::WindowAttributes::default(), "");
+        assert!(unlocked.resizable);
+        LOCK_WINDOW_SIZE.set(true);
     }
 }

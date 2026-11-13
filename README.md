@@ -8,7 +8,7 @@
 ---
 
 > [!NOTE]
-> **Active Development:** `shinpi` changes frequently and may contain bugs. Saved settings may become outdated after updates. Support for individual HID devices still requires verification on physical hardware.
+> **Active Development:** `shinpi` changes frequently and may contain bugs. Saved settings may become outdated after updates; `Reset` at the bottom of General restores appearance defaults. Support for individual HID devices still requires verification on physical hardware.
 
 ---
 
@@ -41,11 +41,20 @@
 | Left-click on tray | Toggle the device panel and refresh readings when opening. |
 | Right-click on tray | Open the Refresh, Settings and Quit menu. |
 | Gear icon | Open settings. |
+| Icon theme in General → Appearance | Choose `Colored` or `Monochrome` for the tray battery icon. |
 | `Add` | Choose a discovered device to display. |
 | Pencil in Settings | Change a device's name and icon. |
 | Red `×` in Settings | Remove a device from the panel. |
-| Diagnostics in Settings → Devices | Open source and access diagnostics. |
-| Check for updates in About | Check the latest stable version and open its release page. |
+| Diagnostics in Settings → Devices | View source, access and notification errors in separate cards; close with the top-right `×`. |
+| Open About | Check the latest stable version automatically when enabled; otherwise use `Check for updates` beside the version. Open the release page when an update is available. |
+| Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size, resize lock and Dev visibility are saved automatically. |
+| Lock window resizing in Dev | Prevent manual window resizing (enabled by default). Unlocked settings window dimensions are saved when resized. |
+| Icon sources in Dev | Expand or collapse icon format diagnostics. |
+| Send test notification in Dev | Test the same desktop notification service independently of battery rules, inspect its reply or error, and review why each selected device can or cannot notify. |
+| Automatically check for updates in Dev | Enable or disable checks when opening About (enabled by default); the preference is saved. |
+| Reset in Dev | Restore the default window dimensions, logo size, resize lock and automatic update checks. |
+| Reset at the bottom of General | Restore appearance defaults and hide Dev; keep selected devices, notification history, notification rules and the update-check preference. |
+| Panel width and Recent notifications in General → Appearance | Set the device panel width and displayed history count; `0` disables the notification panel. |
 | Triangle | Toggle notification history. |
 | `×` on a notification | Dismiss the entry. |
 | Pin icon | Keep the panel open when it loses focus. |
@@ -57,6 +66,12 @@
 | `--help` | Show command-line help. |
 
 The empty panel's `Add` button disappears after selecting a device; further devices are added through Settings. Sources are listed separately, so choose the source that works best for each device.
+
+The mouse wheel scrolls settings content without changing field values or selections. Charging devices show a blue lightning bolt and blue battery text.
+
+Discrete battery levels are displayed as estimates: Critical `10%`, Low `25%`, Normal `50%`, High `75%`, Full `100%`. These estimates use the same color scale and notification threshold as numeric readings.
+
+Changing the notification toggle, threshold or repeat interval requests a fresh reading immediately. The threshold includes equality; a `20%` reading qualifies at a `20%` threshold. Notifications require a current reading from the selected source and pause while charging.
 
 </details>
 

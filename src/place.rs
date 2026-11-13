@@ -40,6 +40,29 @@ pub async fn install() -> bool {
             &("shinpi-place",),
         )
         .await;
+    let name_path = folder.join("placer.name");
+    if let Ok(previous) = fs::read_to_string(&name_path) {
+        let previous = previous.trim();
+        if previous.strip_prefix("shinpiplace").is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == '_')
+        }) {
+            let _ = conn
+                .call_method(
+                    Some("org.kde.KWin"),
+                    "/Scripting",
+                    Some("org.kde.kwin.Scripting"),
+                    "unloadScript",
+                    &(previous,),
+                )
+                .await;
+        }
+    }
+    // A new name avoids reusing a script that KWin is still deleting.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let name = format!("shinpiplace{}_{stamp}", std::process::id());
     let rules_changed = write_taskbar_rule();
     if rules_changed {
         let _ = conn
@@ -58,7 +81,7 @@ pub async fn install() -> bool {
             "/Scripting",
             Some("org.kde.kwin.Scripting"),
             "loadScript",
-            &(path.display().to_string(), "shinpi-place"),
+            &(path.display().to_string(), name.as_str()),
         )
         .await;
     let Ok(reply) = reply else { return false };
@@ -76,6 +99,9 @@ pub async fn install() -> bool {
         )
         .await
         .is_ok();
+    if ran {
+        let _ = fs::write(name_path, name);
+    }
     ran
 }
 

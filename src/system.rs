@@ -78,13 +78,12 @@ fn sysfs(scan: &mut Scan, folder: &Path) {
             _ => None,
         }
         .map(str::to_owned);
-        if device.reading.level.is_none() {
-            device.reading.percent = read(&path, "capacity")
-                .parse::<u8>()
-                .ok()
-                .filter(|p| *p <= 100);
-        }
-        device.reading.approximate = device.reading.level.is_some();
+        device.reading.percent = read(&path, "capacity")
+            .parse::<u8>()
+            .ok()
+            .filter(|p| *p <= 100);
+        device.reading.approximate =
+            device.reading.percent.is_none() && device.reading.level.is_some();
         scan.insert(device);
     }
 }
@@ -354,7 +353,7 @@ mod tests {
             assert_eq!(scan.devices.len(), 2);
             assert_ne!(scan.devices[0].id, scan.devices[1].id);
             assert!(scan.devices[0].id.contains("aa:bb:cc:dd:ee:ff"));
-            assert_eq!(scan.devices[0].reading.text(), "Низкий");
+            assert_eq!(scan.devices[0].reading.text(), "25%");
             assert_eq!(scan.devices[1].reading.text(), "0%");
             assert_eq!(scan.devices[1].kind, Kind::Mouse);
         });
@@ -370,7 +369,7 @@ mod tests {
         let d = upower_device("/mouse", &p).unwrap();
         assert_ne!(d.id, upower_device("/another_mouse", &p).unwrap().id);
         assert_eq!(d.reading.percent, None);
-        assert_eq!(d.reading.text(), "Низкий");
+        assert_eq!(d.reading.text(), "25%");
         p.insert("BatteryLevel".into(), OwnedVariant::from(0u32));
         assert!(!upower_device("/mouse", &p).unwrap().has_reading());
         p.insert("BatteryLevel".into(), OwnedVariant::from(1u32));

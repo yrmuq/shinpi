@@ -6,6 +6,50 @@ import test from 'node:test';
 const context = vm.createContext({
     workspace: { windowList: () => [], windowAdded: { connect() {} } },
 });
+
+test('decorated titles and fractional notice geometry survive repeated tray openings', () => {
+    const output = { geometry: { x: 0, y: 0, width: 1200, height: 800 }, devicePixelRatio: 1.25 };
+    const panel = { dock: true, resourceClass: 'plasmashell', output,
+        frameGeometry: { x: 0, y: 760, width: 1200, height: 40 } };
+    function surface(title, initial, rounding) {
+        let frame = initial;
+        const listeners = {};
+        const signal = name => ({ connect(fn) { (listeners[name] ??= []).push(fn); } });
+        return {
+            caption: title + ' <2>', captionNormal: title,
+            resourceClass: '', resourceName: 'shinpi-popup', output, hidden: false, writes: 0,
+            windowShown: signal('shown'), frameGeometryChanged: signal('geometry'), closed: signal('closed'),
+            emit(name) { listeners[name]?.forEach(fn => fn()); },
+            get frameGeometry() { return frame; },
+            set frameGeometry(next) {
+                if (++this.writes > 1000) { throw new Error('Recursive compositor geometry updates'); }
+                frame = { ...next, x: next.x + rounding, y: next.y + rounding, width: next.width + rounding };
+                this.emit('geometry');
+            },
+        };
+    }
+    const popup = surface('shinpi-devices', { x: 420, y: 300, width: 360, height: 140 }, 0);
+    const notice = surface('shinpi-notices', { x: 420, y: 120, width: 360, height: 180 }, 0.25);
+    const ctx = vm.createContext({ KWin: { MaximizeArea: 0 }, workspace: {
+        windowAdded: { connect() {} }, windowList: () => [panel, popup, notice],
+        cursorPos: { x: 1050, y: 780 }, screenAt: () => output,
+        clientArea: () => ({ x: 0, y: 0, width: 1200, height: 760 }),
+    } });
+    vm.runInContext(readFileSync(new URL('../kwin/placer.js', import.meta.url), 'utf8'), ctx);
+    for (let i = 0; i < 100; i++) {
+        popup.hidden = true;
+        popup.frameGeometry = { ...popup.frameGeometry, x: 420, y: 300 };
+        popup.hidden = false;
+        popup.emit('shown');
+        assert.equal(popup.frameGeometry.x, 832);
+        assert.equal(popup.frameGeometry.y, 612);
+        assert.ok(Math.abs(notice.frameGeometry.x - popup.frameGeometry.x) < 0.5);
+        assert.ok(Math.abs(notice.frameGeometry.y + notice.frameGeometry.height - popup.frameGeometry.y) < 0.5);
+    }
+    assert.equal(popup.skipTaskbar, true);
+    assert.equal(notice.skipTaskbar, true);
+    assert.ok(notice.writes < 150, 'subpixel echoes do not repeatedly move the notice');
+});
 vm.runInContext(readFileSync(new URL('../kwin/placer.js', import.meta.url), 'utf8'), context);
 
 test('popup stays beside all panel edges and inside the selected output', () => {
@@ -102,4 +146,48 @@ test('notification history follows popup width and stays above it at the top edg
     notes.visibility();
     assert.equal(popup.frameGeometry.y, 48);
     assert.equal(context.isNotice({ caption: 'shinpi-notices', resourceClass: 'other' }), false);
+});
+
+test('late window identity hides only tray panels and places them again when shown', () => {
+    for (const classFirst of [true, false]) {
+        const output = { geometry: { x: 0, y: 0, width: 1200, height: 800 } };
+        const area = { x: 0, y: 0, width: 1200, height: 760 };
+        const panel = { dock: true, resourceClass: 'plasmashell', output,
+            frameGeometry: { x: 0, y: 760, width: 1200, height: 40 } };
+        const listeners = {};
+        const signal = name => ({ connect(callback) { (listeners[name] ??= []).push(callback); } });
+        const emit = name => listeners[name]?.forEach(callback => callback());
+        const popup = {
+            caption: '', resourceClass: '', output, hidden: true,
+            frameGeometry: { x: 420, y: 300, width: 360, height: 140 },
+            captionChanged: signal('caption'), windowClassChanged: signal('class'),
+            windowShown: signal('shown'), frameGeometryChanged: signal('geometry'),
+            closed: signal('closed'),
+        };
+        const settings = { caption: 'shinpi', resourceClass: 'shinpi', skipTaskbar: false };
+        const ctx = vm.createContext({ KWin: { MaximizeArea: 0 }, workspace: {
+            windowList: () => [panel, popup, settings], windowAdded: { connect() {} },
+            cursorPos: { x: 1050, y: 780 }, screenAt: () => output, clientArea: () => area,
+        } });
+        vm.runInContext(readFileSync(new URL('../kwin/placer.js', import.meta.url), 'utf8'), ctx);
+        if (classFirst) {
+            popup.resourceClass = 'shinpi-popup'; emit('class');
+            assert.equal(popup.skipTaskbar, true, 'hide before the title arrives');
+            popup.caption = 'shinpi-devices'; emit('caption');
+        } else {
+            popup.caption = 'shinpi-devices'; emit('caption');
+            popup.resourceClass = 'shinpi-popup'; emit('class');
+        }
+        popup.hidden = false; emit('shown');
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        assert.equal(popup.skipTaskbar, true);
+        assert.equal(popup.skipPager, true);
+        assert.equal(popup.skipSwitcher, true);
+        assert.equal(settings.skipTaskbar, false, 'settings retain their taskbar entry');
+        popup.hidden = true;
+        popup.frameGeometry = { ...popup.frameGeometry, x: 420, y: 300 };
+        popup.hidden = false; emit('shown');
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        assert.equal(listeners.geometry.length, 1, 'identity signals do not duplicate tracking');
+    }
 });

@@ -12,6 +12,13 @@ pub fn theme_icon(name: &str) -> Option<ThemeIcon> {
     Some(ThemeIcon { image, tint })
 }
 
+pub fn source_format(name: &str) -> Option<String> {
+    locate_icon(name)?
+        .extension()?
+        .to_str()
+        .map(str::to_uppercase)
+}
+
 fn locate_icon(name: &str) -> Option<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     let theme = icon_theme_name();
@@ -236,22 +243,40 @@ fn load_slint_image(path: &Path) -> Option<slint::Image> {
     }
 }
 
+pub fn charge_color(band: crate::device::Band) -> crate::theme::Rgb {
+    use crate::{device::Band, theme::Rgb};
+    match band {
+        Band::Low => Rgb {
+            r: 0xda,
+            g: 0x44,
+            b: 0x53,
+        },
+        Band::Medium => Rgb {
+            r: 0xfd,
+            g: 0xbc,
+            b: 0x4b,
+        },
+        Band::High | Band::Full => Rgb {
+            r: 0x27,
+            g: 0xae,
+            b: 0x60,
+        },
+    }
+}
+
 pub fn tray_svg(
     band: Option<crate::device::Band>,
     orientation: u8,
     colored: bool,
     dark: bool,
 ) -> String {
-    use crate::device::Band;
     let ink = if dark { "#fcfcfc" } else { "#232629" };
-    let fill = if !colored {
-        ink
-    } else {
-        match band {
-            Some(Band::Low) => "#da4453",
-            Some(Band::Medium) => "#fdbc4b",
-            _ => "#27ae60",
+    let fill = match band.filter(|_| colored) {
+        Some(band) => {
+            let rgb = charge_color(band);
+            format!("#{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b)
         }
+        None => ink.into(),
     };
     let angle = match orientation {
         0 => 90,
