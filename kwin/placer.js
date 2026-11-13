@@ -219,9 +219,16 @@ function trackNotice(window) {
 }
 
 function arm(window) {
-    track(window);
-    trackNotice(window);
-    if (window.captionChanged) { window.captionChanged.connect(() => { track(window); trackNotice(window); }); }
+    const identify = () => {
+        if (isOurs(window) && String(window.resourceClass) === "shinpi-popup") {
+            hideFromTaskbar(window);
+        }
+        track(window);
+        trackNotice(window);
+    };
+    identify();
+    if (window.captionChanged) { window.captionChanged.connect(identify); }
+    if (window.windowClassChanged) { window.windowClassChanged.connect(identify); }
 }
 workspace.windowAdded.connect(arm);
 workspace.windowList().forEach(arm);

@@ -100,40 +100,9 @@ struct Shell {
 
 thread_local! {
     static CREATING_PANEL: Cell<&'static str> = const { Cell::new("") };
-    static POPUP_CLASS_HELD: Cell<bool> = const { Cell::new(false) };
 }
 
 const POPUP_CLASS: &str = "shinpi-popup";
-
-/// Wayland destroys a hidden popup and maps the next one before its title exists.
-/// Hold a dedicated application id until that window exists so KWin skips the taskbar.
-fn hold_popup_class() {
-    if POPUP_CLASS_HELD.replace(true) {
-        return;
-    }
-    let _ = slint::set_xdg_app_id(POPUP_CLASS);
-}
-
-fn release_popup_class(shell: &Shell) {
-    if !POPUP_CLASS_HELD.get() {
-        return;
-    }
-    let pending =
-        |window: &slint::Window| window.is_visible() && window.with_winit_window(|_| ()).is_none();
-    if shell
-        .popup
-        .as_ref()
-        .is_some_and(|popup| pending(popup.window()))
-        || shell
-            .notices
-            .as_ref()
-            .is_some_and(|notices| pending(notices.window()))
-    {
-        return;
-    }
-    POPUP_CLASS_HELD.set(false);
-    let _ = slint::set_xdg_app_id("shinpi");
-}
 
 fn window_attributes(
     attributes: winit::window::WindowAttributes,
@@ -145,6 +114,10 @@ fn window_attributes(
         .with_resizable(false)
         .with_transparent(popup)
         .with_title(if popup { panel } else { "shinpi" });
+    let class = if popup { POPUP_CLASS } else { "shinpi" };
+    let attributes = WindowAttributesExtX11::with_name(attributes, class, class);
+    let attributes =
+        winit::platform::wayland::WindowAttributesExtWayland::with_name(attributes, class, class);
     if popup {
         attributes.with_x11_window_type(vec![WindowType::PopupMenu])
     } else {
@@ -158,9 +131,13 @@ fn ensure_popup(
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Popup> {
     if let Some(popup) = &shell.popup {
-        return Some(popup.clone_strong());
+        if popup.window().is_visible() {
+            return Some(popup.clone_strong());
+        }
     }
-    hold_popup_class();
+    // Slint 1.18 discards native attributes on Wayland hide; recreate the panel adapter.
+    shell.notices = None;
+    shell.popup = None;
     CREATING_PANEL.set("shinpi-devices");
     let result = Popup::new();
     if let Ok(popup) = &result {
@@ -246,10 +223,12 @@ fn ensure_notices(
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Notices> {
     if let Some(notices) = &shell.notices {
-        return Some(notices.clone_strong());
+        if notices.window().is_visible() {
+            return Some(notices.clone_strong());
+        }
     }
+    shell.notices = None;
     let popup = shell.popup.as_ref()?;
-    hold_popup_class();
     CREATING_PANEL.set("shinpi-notices");
     let result = Notices::new();
     if let Ok(notices) = &result {
@@ -298,7 +277,10 @@ fn sync_notices(
         }
         return;
     }
-    let fresh = shell.notices.is_none();
+    let fresh = shell
+        .notices
+        .as_ref()
+        .is_none_or(|notices| !notices.window().is_visible());
     let Some(notices) = ensure_notices(shell, state, sender) else {
         return;
     };
@@ -307,7 +289,6 @@ fn sync_notices(
         fill(shell, &state.borrow());
     }
     if !notices.window().is_visible() {
-        hold_popup_class();
         notices.set_expanded(false);
         let _ = notices.get_slide();
         let _ = notices.show();
@@ -357,12 +338,19 @@ fn ensure_settings(
     shell: &mut Shell,
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
 ) -> Option<Settings> {
-    if let Some(settings) = &shell.settings {
-        return Some(settings.clone_strong());
-    }
+    let tab = if let Some(settings) = &shell.settings {
+        if settings.window().is_visible() {
+            return Some(settings.clone_strong());
+        }
+        settings.get_tab_index()
+    } else {
+        0
+    };
+    shell.settings = None;
     let settings = Settings::new()
         .map_err(|e| eprintln!("shinpi: settings: {e}"))
         .ok()?;
+    settings.set_tab_index(tab);
     let tx = sender.clone();
     settings.on_add(move || {
         let _ = tx.send(Command::Add);
@@ -692,7 +680,6 @@ fn fill(shell: &Shell, state: &State) {
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
     timer.stop();
     if open {
-        hold_popup_class();
         popup.set_slide(popup.get_layout_height());
         if let Err(e) = popup.show() {
             eprintln!("shinpi: {e}");
@@ -778,7 +765,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .renderer_name("femtovg".into())
         .with_winit_window_attributes_hook(|a| window_attributes(a, CREATING_PANEL.get()))
         .select()?;
-    let _ = slint::set_xdg_app_id("shinpi");
     let shell = Rc::new(RefCell::new(Shell::default()));
     let state = Rc::new(RefCell::new(State {
         config: config::load(),
@@ -861,7 +847,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         slint::TimerMode::Repeated,
         Duration::from_millis(60),
         move || {
-            release_popup_class(&tick_shell.borrow());
             let mut windows = tick_shell.borrow_mut();
             let mut changed = false;
             let mut redraw = false;

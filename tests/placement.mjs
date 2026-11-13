@@ -103,3 +103,47 @@ test('notification history follows popup width and stays above it at the top edg
     assert.equal(popup.frameGeometry.y, 48);
     assert.equal(context.isNotice({ caption: 'shinpi-notices', resourceClass: 'other' }), false);
 });
+
+test('late window identity hides only tray panels and places them again when shown', () => {
+    for (const classFirst of [true, false]) {
+        const output = { geometry: { x: 0, y: 0, width: 1200, height: 800 } };
+        const area = { x: 0, y: 0, width: 1200, height: 760 };
+        const panel = { dock: true, resourceClass: 'plasmashell', output,
+            frameGeometry: { x: 0, y: 760, width: 1200, height: 40 } };
+        const listeners = {};
+        const signal = name => ({ connect(callback) { (listeners[name] ??= []).push(callback); } });
+        const emit = name => listeners[name]?.forEach(callback => callback());
+        const popup = {
+            caption: '', resourceClass: '', output, hidden: true,
+            frameGeometry: { x: 420, y: 300, width: 360, height: 140 },
+            captionChanged: signal('caption'), windowClassChanged: signal('class'),
+            windowShown: signal('shown'), frameGeometryChanged: signal('geometry'),
+            closed: signal('closed'),
+        };
+        const settings = { caption: 'shinpi', resourceClass: 'shinpi', skipTaskbar: false };
+        const ctx = vm.createContext({ KWin: { MaximizeArea: 0 }, workspace: {
+            windowList: () => [panel, popup, settings], windowAdded: { connect() {} },
+            cursorPos: { x: 1050, y: 780 }, screenAt: () => output, clientArea: () => area,
+        } });
+        vm.runInContext(readFileSync(new URL('../kwin/placer.js', import.meta.url), 'utf8'), ctx);
+        if (classFirst) {
+            popup.resourceClass = 'shinpi-popup'; emit('class');
+            assert.equal(popup.skipTaskbar, true, 'hide before the title arrives');
+            popup.caption = 'shinpi-devices'; emit('caption');
+        } else {
+            popup.caption = 'shinpi-devices'; emit('caption');
+            popup.resourceClass = 'shinpi-popup'; emit('class');
+        }
+        popup.hidden = false; emit('shown');
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        assert.equal(popup.skipTaskbar, true);
+        assert.equal(popup.skipPager, true);
+        assert.equal(popup.skipSwitcher, true);
+        assert.equal(settings.skipTaskbar, false, 'settings retain their taskbar entry');
+        popup.hidden = true;
+        popup.frameGeometry = { ...popup.frameGeometry, x: 420, y: 300 };
+        popup.hidden = false; emit('shown');
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        assert.equal(listeners.geometry.length, 1, 'identity signals do not duplicate tracking');
+    }
+});

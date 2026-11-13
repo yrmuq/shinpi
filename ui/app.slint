@@ -443,6 +443,7 @@ export component Settings inherits Window {
     min-height: 620px;
     max-height: 620px;
     in-out property <bool> dark;
+    in-out property <int> tab-index;
     in-out property <string> ui-font-family: "Noto Sans";
     in-out property <length> ui-font-size: 13.333px;
     in-out property <int> ui-font-weight: 400;
@@ -565,6 +566,7 @@ export component Settings inherits Window {
         padding: 12px;
         spacing: 10px;
         TabWidget {
+            current-index <=> root.tab-index;
             vertical-stretch: 1;
             Tab {
                 title: Translations.tr(25);
