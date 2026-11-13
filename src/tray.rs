@@ -8,6 +8,7 @@ pub enum Command {
     Settings,
     Quit,
     CheckUpdate,
+    TestNotification,
     AboutOpened,
     AutoCheckUpdates(bool),
     OpenLink(String),

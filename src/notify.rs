@@ -1,4 +1,7 @@
-use crate::{config::Config, device::Scan};
+use crate::{
+    config::{Config, Selected},
+    device::Scan,
+};
 use std::{collections::HashMap, time::Duration};
 
 pub fn due(
@@ -7,22 +10,10 @@ pub fn due(
     now: u64,
     catalog: &crate::i18n::Catalog,
 ) -> Vec<(String, String)> {
-    if !config.notifications {
-        return vec![];
-    }
     config
         .devices
         .iter()
-        .filter(|selected| {
-            fresh
-                .devices
-                .iter()
-                .any(|d| d.id == selected.id && d.reading.low(config.low_threshold))
-                && (selected.last_notified == 0
-                    || now < selected.last_notified
-                    || now.saturating_sub(selected.last_notified)
-                        >= u64::from(config.repeat_minutes) * 60)
-        })
+        .filter(|selected| blocked(config, selected, fresh, now).is_none())
         .map(|d| {
             (
                 d.id.clone(),
@@ -35,7 +26,66 @@ pub fn due(
         .collect()
 }
 
-pub async fn send(title: &str, message: &str) -> zbus::Result<()> {
+fn blocked(config: &Config, selected: &Selected, fresh: &Scan, now: u64) -> Option<&'static str> {
+    if !config.notifications {
+        return Some("Notifications are disabled.");
+    }
+    let Some(device) = fresh.devices.iter().find(|d| d.id == selected.id) else {
+        return Some("No current reading from the selected source.");
+    };
+    if device.reading.charging {
+        return Some("The device is charging.");
+    }
+    let Some(percent) = device.reading.percentage() else {
+        return Some("Battery level is unavailable.");
+    };
+    if percent > config.low_threshold {
+        return Some("Battery level is above the threshold.");
+    }
+    if selected.last_notified != 0
+        && now >= selected.last_notified
+        && now - selected.last_notified < u64::from(config.repeat_minutes) * 60
+    {
+        return Some("Waiting for the repeat interval.");
+    }
+    None
+}
+
+pub fn diagnostics(
+    config: &Config,
+    fresh: &Scan,
+    now: u64,
+    catalog: &crate::i18n::Catalog,
+) -> String {
+    if config.devices.is_empty() {
+        return catalog.tr("No devices are selected.");
+    }
+    config
+        .devices
+        .iter()
+        .map(|selected| {
+            let reading = fresh
+                .devices
+                .iter()
+                .find(|d| d.id == selected.id)
+                .map(|d| catalog.reading(&d.reading))
+                .unwrap_or_else(|| catalog.tr("No data"));
+            catalog.trf(
+                "{} ({}): {} — {}",
+                &[
+                    &selected.name,
+                    &selected.source,
+                    &reading,
+                    &catalog.tr(blocked(config, selected, fresh, now)
+                        .unwrap_or("Ready to send a low-battery notification.")),
+                ],
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+pub async fn send(title: &str, message: &str) -> zbus::Result<u32> {
     let connection = zbus::connection::Builder::session()
         .method_timeout(Duration::from_secs(3))
         .build()
@@ -53,7 +103,7 @@ pub async fn send(title: &str, message: &str) -> zbus::Result<()> {
         ("urgency", zbus::Variant::from(1u8)),
     ]);
     let actions: Vec<&str> = vec![];
-    connection
+    let reply = connection
         .call_method(
             Some("org.freedesktop.Notifications"),
             "/org/freedesktop/Notifications",
@@ -71,13 +121,36 @@ pub async fn send(title: &str, message: &str) -> zbus::Result<()> {
             ),
         )
         .await?;
-    Ok(())
+    reply.body().deserialize()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::device::{Device, Kind};
+    #[test]
+    fn diagnostics_explain_why_a_saved_twenty_percent_reading_cannot_notify() {
+        let catalog = crate::i18n::Catalog::load("English");
+        let mut headset = Device::new("test".into(), "Headphones".into(), Kind::Headset, "BlueZ");
+        headset.reading.percent = Some(20);
+        let mut config = Config::default();
+        config.add(&headset);
+        config.low_threshold = 20;
+        let mut fresh = Scan {
+            devices: vec![],
+            warnings: vec![],
+        };
+        assert!(diagnostics(&config, &fresh, 100, &catalog).contains("No current reading"));
+        assert!(due(&config, &fresh, 100, &catalog).is_empty());
+        fresh.devices.push(headset);
+        assert!(diagnostics(&config, &fresh, 100, &catalog).contains("Ready to send"));
+        assert_eq!(due(&config, &fresh, 100, &catalog).len(), 1);
+        config.devices[0].last_notified = 100;
+        assert!(diagnostics(&config, &fresh, 101, &catalog).contains("Waiting for the repeat"));
+        fresh.devices[0].reading.charging = true;
+        assert!(diagnostics(&config, &fresh, 4000, &catalog).contains("device is charging"));
+    }
+
     #[test]
     fn changed_rules_notify_at_twenty_percent_and_repeat_after_one_minute() {
         let catalog = crate::i18n::Catalog::load("English");

@@ -1,6 +1,29 @@
 // Copyright (C) 2026 yrmuq.
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, SpinBox } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView as StandardScrollView, SpinBox } from "std-widgets.slint";
+
+global SettingsWheel {
+    in-out property <int> sequence;
+    in-out property <int> target;
+    in-out property <float> dx;
+    in-out property <float> dy;
+}
+
+component ScrollView inherits StandardScrollView {
+    in property <int> wheel-target: -1;
+    in property <bool> wheel-horizontal: true;
+    in property <bool> wheel-vertical: true;
+    property <int> wheel-sequence: SettingsWheel.sequence;
+    changed wheel-sequence => {
+        if self.wheel-target >= 0 && self.wheel-target == SettingsWheel.target {
+            self.scroll(self.wheel-horizontal ? SettingsWheel.dx : 0, self.wheel-vertical ? SettingsWheel.dy : 0);
+        }
+    }
+    public function scroll(dx: float, dy: float) {
+        self.content-x = Math.clamp(self.content-x + dx * 1px, Math.min(0px, self.visible-width - self.content-width), 0px);
+        self.content-y = Math.clamp(self.content-y + dy * 1px, Math.min(0px, self.visible-height - self.content-height), 0px);
+    }
+}
 
 export global Translations {
     in-out property <[string]> strings;
@@ -16,6 +39,7 @@ export struct DeviceRow {
     charge-color: color,
     has-percent: bool,
     added: bool,
+    charging: bool,
 }
 
 export struct NoticeRow {
@@ -147,13 +171,21 @@ component DeviceLine inherits Rectangle {
             Text { text: root.entry.name; color: Breeze.fg; min-width: 0px; overflow: elide; horizontal-stretch: 1; }
             if root.show-source: Text { text: root.entry.detail; color: Breeze.inactive; min-width: 0px; font-size: 11px; overflow: elide; }
         }
-        Text {
-            text: root.entry.charge;
-            color: root.entry.has-percent ? root.entry.charge-color : Breeze.fg;
-            font-weight: 600;
-            vertical-alignment: center;
-            min-width: 66px;
-            horizontal-alignment: right;
+        VerticalLayout {
+            alignment: center; min-width: 66px; horizontal-stretch: 0;
+            HorizontalLayout {
+                alignment: end; spacing: 4px;
+                if root.entry.charging: Image {
+                    source: @image-url("icons/charging.svg");
+                    width: 14px; height: 18px; colorize: #3daee9;
+                }
+                Text {
+                    text: root.entry.charge;
+                    color: root.entry.charging ? #3daee9 : (root.entry.has-percent ? root.entry.charge-color : Breeze.fg);
+                    font-weight: 600; vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
+            }
         }
         @children
     }
@@ -350,7 +382,8 @@ component AddDevices inherits Rectangle {
         Text { text: Translations.tr(9); color: Breeze.fg; font-weight: 600; }
         Text { text: Translations.tr(10); color: Breeze.inactive; wrap: word-wrap; }
         if root.rows.length == 0: Text { text: root.busy ? Translations.tr(11) : Translations.tr(12); color: Breeze.inactive; wrap: word-wrap; }
-        ScrollView {
+        devices-scroll := ScrollView {
+                wheel-target: 4;
             content-width: self.visible-width;
             VerticalLayout {
                 spacing: 6px;
@@ -483,15 +516,16 @@ component PageTabs inherits Rectangle {
             accessible-item-selectable: true;
             accessible-item-selected: root.selected == index;
             accessible-action-default => { root.selected = index; keys.focus(); }
-            background: root.selected == index ? Breeze.button : (touch.has-hover ? Breeze.button-hover : transparent);
+            preferred-width: 0px; min-width: 0px; horizontal-stretch: 1;
+            background: touch.has-hover ? Breeze.button-hover : transparent;
             border-radius: Breeze.radius;
-            border-width: keys.has-focus && root.selected == index ? 1px : 0px;
-            border-color: Breeze.outline;
+            border-width: 1px;
+            border-color: root.selected == index ? Breeze.outline : Breeze.frame;
             Text {
                 x: 8px; width: parent.width - 16px; height: parent.height;
                 text: label; color: Breeze.fg;
                 font-weight: root.selected == index ? 600 : 400;
-                vertical-alignment: center; overflow: elide;
+                vertical-alignment: center; horizontal-alignment: center; overflow: elide;
             }
             touch := TouchArea { mouse-cursor: pointer; clicked => { root.selected = index; keys.focus(); } }
         }
@@ -584,6 +618,11 @@ export component Settings inherits Window {
     callback auto-check-updates-changed(bool);
     callback about-opened();
     callback check-update();
+    callback test-notification();
+    in-out property <bool> testing-notification;
+    in-out property <bool> notification-test-failed;
+    in-out property <string> notification-test-status;
+    in-out property <string> notification-report;
     callback open-link(string);
     in-out property <[DeviceRow]> found-rows;
     in-out property <bool> busy;
@@ -593,22 +632,29 @@ export component Settings inherits Window {
     callback add-device(int);
     callback refresh();
     callback save-device(string, int);
-    public function open-add() { add-dialog.show(); }
-    public function open-editor() { edit-dialog.show(); }
-    public function close-editor() { edit-dialog.close(); }
-    public function close-dialogs() { add-dialog.close(); edit-dialog.close(); diagnostics-dialog.close(); }
+    property <int> scroll-dialog;
+    public function scroll-settings(dx: float, dy: float) {
+        SettingsWheel.dx = dx;
+        SettingsWheel.dy = dy;
+        SettingsWheel.target = root.scroll-dialog == 0 ? root.tab-index : root.scroll-dialog + 3;
+        SettingsWheel.sequence += 1;
+    }
+    public function open-add() { root.scroll-dialog = 1; add-dialog.show(); }
+    public function open-editor() { root.scroll-dialog = 2; edit-dialog.show(); }
+    public function close-editor() { root.scroll-dialog = 0; edit-dialog.close(); }
+    public function close-dialogs() { root.scroll-dialog = 0; add-dialog.close(); edit-dialog.close(); diagnostics-dialog.close(); }
     add-dialog := PopupWindow {
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
         width: 560px;
         height: 440px;
         close-policy: no-auto-close;
-        AddDevices {
+        add-content := AddDevices {
             rows: root.found-rows;
             busy: root.busy;
             add-device(index) => { root.add-device(index); }
             refresh => { root.refresh(); }
-            dismiss => { add-dialog.close(); }
+            dismiss => { root.scroll-dialog = 0; add-dialog.close(); }
         }
     }
     edit-dialog := PopupWindow {
@@ -622,7 +668,7 @@ export component Settings inherits Window {
             kind-index <=> root.edit-kind;
             error: root.edit-error;
             save-device(name, kind) => { root.save-device(name, kind); }
-            dismiss => { edit-dialog.close(); }
+            dismiss => { root.close-editor(); }
         }
     }
     diagnostics-dialog := PopupWindow {
@@ -643,11 +689,12 @@ export component Settings inherits Window {
                     Text { text: Translations.tr(50); color: Breeze.fg; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
                     ToolButton {
                         flat: true; label: Translations.tr(15);
-                        clicked => { diagnostics-dialog.close(); }
+                        clicked => { root.scroll-dialog = 0; diagnostics-dialog.close(); }
                         Text { text: "×"; font-size: 22px; color: Breeze.fg; }
                     }
                 }
                 diagnostics-scroll := ScrollView {
+                wheel-target: 6;
                     content-width: self.visible-width;
                     VerticalLayout {
                         padding: 8px;
@@ -676,7 +723,8 @@ export component Settings inherits Window {
         }
         Rectangle {
             vertical-stretch: 1; clip: true;
-            if root.tab-index == 0: ScrollView {
+            if root.tab-index == 0: general-scroll := ScrollView {
+                wheel-target: 0;
                 content-width: self.visible-width;
                 VerticalLayout {
                     padding: 12px;
@@ -771,7 +819,8 @@ export component Settings inherits Window {
                     padding: 8px;
                     spacing: 10px;
                     if root.rows.length == 0: Text { text: Translations.tr(47); color: Breeze.inactive; wrap: word-wrap; vertical-stretch: 0; }
-                    if root.rows.length > 0: ScrollView {
+                    if root.rows.length > 0: selected-scroll := ScrollView {
+                wheel-target: 1;
                         max-height: Math.max(70px, root.rows.length * 64px);
                         content-width: self.visible-width;
                         VerticalLayout {
@@ -794,12 +843,13 @@ export component Settings inherits Window {
                     }
                     HorizontalLayout {
                         spacing: 16px;
-                        Button { text: Translations.tr(50); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; clicked => { diagnostics-dialog.show(); } }
+                        Button { text: Translations.tr(50); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; clicked => { root.scroll-dialog = 3; diagnostics-dialog.show(); } }
                         Button { text: Translations.tr(6); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; clicked => { root.add(); } }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             if root.tab-index == 2: about-scroll := ScrollView {
+                wheel-target: 2; wheel-horizontal: false;
                 content-width: self.visible-width;
                 VerticalLayout {
                     min-height: about-scroll.visible-height;
@@ -808,7 +858,8 @@ export component Settings inherits Window {
                     HorizontalLayout {
                         spacing: 20px;
                         VerticalLayout {
-                            width: Math.max(root.logo-size * 1px, 110px);
+                            width: (root.width - 90px) / 2;
+
                             alignment: center; spacing: 8px;
                             HorizontalLayout {
                                 alignment: center;
@@ -822,7 +873,8 @@ export component Settings inherits Window {
                             Text { text: "shinpi"; font-size: 16px; font-weight: 700; color: Breeze.fg; horizontal-alignment: center; }
                         }
                         VerticalLayout {
-                            alignment: center; spacing: 8px; horizontal-stretch: 1;
+                            width: (root.width - 90px) / 2;
+                            alignment: center; spacing: 8px;
                             HorizontalLayout {
                                 alignment: start; spacing: 6px;
                                 Text { text: Translations.tr(95) + ":"; color: Breeze.fg; vertical-alignment: center; }
@@ -834,8 +886,8 @@ export component Settings inherits Window {
                                 AboutLink { label: "GPL-3.0-or-later"; activate => { root.open-link("https://github.com/yrmuq/shinpi/blob/main/LICENSE"); } }
                             }
                             HorizontalLayout {
-                                spacing: 12px;
-                                Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                                spacing: 6px;
+                                Text { text: Translations.tr(94) + ": " + root.version; color: Breeze.fg; vertical-alignment: center; horizontal-stretch: 1; min-width: 0px; wrap: word-wrap; }
                                 if !root.auto-check-updates: Button {
                                     text: Translations.tr(97);
                                     enabled: !root.checking-update;
@@ -853,7 +905,8 @@ export component Settings inherits Window {
                         }
                     }
                     Rectangle { min-height: root.ui-font-size * 2; vertical-stretch: 1; background: transparent; }
-                    ScrollView {
+                    parts-scroll := ScrollView {
+                        wheel-target: 2; wheel-vertical: false;
                         height: parts-table.preferred-height + (self.visible-width < 520px ? 14px : 0px);
                         vertical-scrollbar-policy: always-off;
                         content-width: Math.max(self.visible-width, 520px);
@@ -872,7 +925,8 @@ export component Settings inherits Window {
                     }
                 }
             }
-            if root.tab-index == 3 && root.dev-open: ScrollView {
+            if root.tab-index == 3 && root.dev-open: dev-scroll := ScrollView {
+                wheel-target: 3;
                 content-width: self.visible-width;
                 VerticalLayout {
                     padding: 12px; spacing: 14px; alignment: start;
@@ -912,6 +966,13 @@ export component Settings inherits Window {
                             toggled => { root.auto-check-updates-changed(self.checked); }
                         }
                     }
+                    Text { text: Translations.tr(130); color: Breeze.fg; font-weight: 600; }
+                    Button { text: Translations.tr(131); enabled: !root.testing-notification; clicked => { root.test-notification(); } }
+                    if root.notification-test-status != "": Text {
+                        text: root.notification-test-status; wrap: word-wrap;
+                        color: root.notification-test-failed ? #da4453 : Breeze.fg;
+                    }
+                    Text { text: root.notification-report; color: Breeze.fg; wrap: word-wrap; }
                     Button {
                         text: (root.icons-expanded ? "▾ " : "▸ ") + Translations.tr(116);
                         accessible-label: Translations.tr(116);

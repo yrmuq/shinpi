@@ -42,6 +42,8 @@ struct State {
     editing: Option<String>,
     pending_notifications: HashSet<String>,
     notification_error: String,
+    notification_test: Option<Result<u32, String>>,
+    testing_notification: bool,
     update: updates::Status,
     logo_taps: about::LogoTaps,
 }
@@ -52,6 +54,7 @@ enum Event {
     UpdateChecked(Result<Option<String>, ()>),
     LinkOpened(Result<(), String>),
     Notified(String, u64, String, Result<(), String>),
+    NotificationTested(Result<u32, String>),
 }
 
 async fn scan() -> device::Scan {
@@ -424,6 +427,10 @@ fn ensure_settings(
         let _ = tx.send(Command::CheckUpdate);
     });
     let tx = sender.clone();
+    settings.on_test_notification(move || {
+        let _ = tx.send(Command::TestNotification);
+    });
+    let tx = sender.clone();
     settings.on_about_opened(move || {
         let _ = tx.send(Command::AboutOpened);
     });
@@ -460,9 +467,24 @@ fn ensure_settings(
         let _ = tx.send(Command::LockWindowSize(locked));
     });
     let tx = sender.clone();
+    let weak = settings.as_weak();
     settings
         .window()
         .on_winit_window_event(move |window, event| {
+            if let winit::event::WindowEvent::MouseWheel { delta, .. } = event {
+                // Route wheel input to views before standard widgets can edit their values.
+                if let Some(settings) = weak.upgrade() {
+                    let (x, y) = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(x, y) => (*x * 60.0, *y * 60.0),
+                        winit::event::MouseScrollDelta::PixelDelta(delta) => {
+                            let delta = delta.to_logical::<f32>(f64::from(window.scale_factor()));
+                            (delta.x, delta.y)
+                        }
+                    };
+                    settings.invoke_scroll_settings(x, y);
+                }
+                return EventResult::PreventDefault;
+            }
             if let winit::event::WindowEvent::Resized(size) = event {
                 if window.is_visible() && !LOCK_WINDOW_SIZE.get() {
                     let size = size.to_logical::<u32>(f64::from(window.scale_factor()));
@@ -573,7 +595,28 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_lock_window_size(cfg.lock_window_size);
         settings.set_dev_open(cfg.dev_tab);
         settings.set_auto_check_updates(cfg.auto_check_updates);
+        settings.set_testing_notification(state.testing_notification);
+        settings.set_notification_test_failed(matches!(state.notification_test, Some(Err(_))));
+        settings.set_notification_test_status(if state.testing_notification {
+            catalog.tr("Sending a test notification…")
+        } else {
+            match &state.notification_test {
+                None => String::new(),
+                Some(Ok(id)) => catalog.trf("The system accepted notification ID {}. If no popup appeared, check Do Not Disturb and shinpi notification permissions in KDE.", &[&id.to_string()]),
+                Some(Err(error)) => catalog.trf("Notifications unavailable: {}", &[error]),
+            }
+        }.into());
         if cfg.dev_tab {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let mut report = notify::diagnostics(cfg, &state.scan, now, catalog);
+            if !state.notification_error.is_empty() {
+                report.push_str("\n\n");
+                report.push_str(&catalog.message(&state.notification_error));
+            }
+            settings.set_notification_report(report.into());
             let mut names = vec!["configure", "window-pin"];
             for device in &cfg.devices {
                 if !names.contains(&device.kind.icon()) {
@@ -686,7 +729,15 @@ fn row(
     };
     DeviceRow {
         name: name.into(),
-        charge: catalog.reading(reading).into(),
+        charge: if reading.charging {
+            reading
+                .percentage()
+                .map(|p| format!("{p}%"))
+                .unwrap_or_else(|| catalog.reading(reading))
+        } else {
+            catalog.reading(reading)
+        }
+        .into(),
         detail: source.into(),
         icon,
         tint,
@@ -697,6 +748,7 @@ fn row(
             .unwrap_or_default(),
         has_percent: reading.percentage().is_some(),
         added,
+        charging: reading.charging,
     }
 }
 
@@ -900,6 +952,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         editing: None,
         pending_notifications: HashSet::new(),
         notification_error: String::new(),
+        notification_test: None,
+        testing_notification: false,
         update: updates::Status::Idle,
         logo_taps: about::LogoTaps::default(),
     }));
@@ -1151,6 +1205,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             redraw = true;
                         }
                     }
+                    Command::TestNotification => {
+                        let mut state = data.borrow_mut();
+                        if !state.testing_notification {
+                            state.testing_notification = true;
+                            redraw = true;
+                            let title = state.catalog.tr("shinpi notification test");
+                            let message = state
+                                .catalog
+                                .tr("This test bypasses battery levels and notification rules.");
+                            let tx = update_tx.clone();
+                            rt_handle.spawn(async move {
+                                let result = notify::send(&title, &message)
+                                    .await
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send(Event::NotificationTested(result));
+                            });
+                        }
+                    }
                     Command::CheckUpdate | Command::AboutOpened => {
                         let automatic = matches!(command, Command::AboutOpened);
                         let allowed = {
@@ -1240,6 +1312,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 redraw = true;
                 let mut state = data.borrow_mut();
                 match event {
+                    Event::NotificationTested(result) => {
+                        state.testing_notification = false;
+                        state.notification_test = Some(result);
+                    }
                     Event::UpdateChecked(result) => {
                         state.update = match result {
                             Ok(Some(version)) => updates::Status::Available(version),
@@ -1269,6 +1345,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 rt_handle.spawn(async move {
                                     let result = notify::send(&title, &message)
                                         .await
+                                        .map(|_| ())
                                         .map_err(|e| e.to_string());
                                     let _ =
                                         tx.send(Event::Notified(id, observed_at, message, result));

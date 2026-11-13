@@ -50,6 +50,7 @@
 | Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size, resize lock and Dev visibility are saved automatically. |
 | Lock window resizing in Dev | Prevent manual window resizing (enabled by default). Unlocked settings window dimensions are saved when resized. |
 | Icon sources in Dev | Expand or collapse icon format diagnostics. |
+| Send test notification in Dev | Test the same desktop notification service independently of battery rules, inspect its reply or error, and review why each selected device can or cannot notify. |
 | Automatically check for updates in Dev | Enable or disable checks when opening About (enabled by default); the preference is saved. |
 | Reset in Dev | Restore the default window dimensions, logo size, resize lock and automatic update checks. |
 | Reset at the bottom of General | Restore appearance defaults and hide Dev; keep selected devices, notification history, notification rules and the update-check preference. |
@@ -65,6 +66,8 @@
 | `--help` | Show command-line help. |
 
 The empty panel's `Add` button disappears after selecting a device; further devices are added through Settings. Sources are listed separately, so choose the source that works best for each device.
+
+The mouse wheel scrolls settings content without changing field values or selections. Charging devices show a blue lightning bolt and blue battery text.
 
 Discrete battery levels are displayed as estimates: Critical `10%`, Low `25%`, Normal `50%`, High `75%`, Full `100%`. These estimates use the same color scale and notification threshold as numeric readings.
 
