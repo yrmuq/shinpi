@@ -8,7 +8,7 @@
 ---
 
 > [!NOTE]
-> **Active Development:** `shinpi` changes frequently and may contain bugs. Saved settings may become outdated after updates. Support for individual HID devices still requires verification on physical hardware.
+> **Active Development:** `shinpi` changes frequently and may contain bugs. Saved settings may become outdated after updates; `Reset` in General → Appearance restores appearance defaults. Support for individual HID devices still requires verification on physical hardware.
 
 ---
 
@@ -45,7 +45,10 @@
 | Pencil in Settings | Change a device's name and icon. |
 | Red `×` in Settings | Remove a device from the panel. |
 | Diagnostics in Settings → Devices | Open source and access diagnostics. |
-| Check for updates in About | Check the latest stable version and open its release page. |
+| Open About | Automatically check the latest stable version; open its release page when an update is available. |
+| Five quick clicks on the About logo | Show or hide Dev. Window dimensions, logo size and Dev visibility are saved automatically. |
+| Reset in Dev | Restore the default window dimensions and logo size. |
+| Reset in General → Appearance | Restore appearance defaults and hide Dev; keep selected devices, notification history and notification rules. |
 | Triangle | Toggle notification history. |
 | `×` on a notification | Dismiss the entry. |
 | Pin icon | Keep the panel open when it loses focus. |

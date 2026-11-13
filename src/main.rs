@@ -1,3 +1,4 @@
+mod about;
 mod config;
 mod device;
 mod hid;
@@ -13,7 +14,7 @@ mod updates;
 
 use slint::{
     winit_030::{winit, EventResult, WinitWindowAccessor},
-    ComponentHandle, ModelRc, VecModel,
+    ComponentHandle, Model, ModelRc, VecModel,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -42,6 +43,7 @@ struct State {
     pending_notifications: HashSet<String>,
     notification_error: String,
     update: updates::Status,
+    logo_taps: about::LogoTaps,
 }
 
 enum Event {
@@ -354,7 +356,6 @@ fn ensure_settings(
     let settings = Settings::new()
         .map_err(|e| eprintln!("shinpi: settings: {e}"))
         .ok()?;
-    settings.set_tab_index(tab);
     let tx = sender.clone();
     settings.on_add(move || {
         let _ = tx.send(Command::Add);
@@ -426,8 +427,28 @@ fn ensure_settings(
         let _ = tx.send(Command::CheckUpdate);
     });
     let tx = sender.clone();
-    settings.on_open_link(move |index| {
-        let _ = tx.send(Command::OpenLink(index));
+    settings.on_open_link(move |url| {
+        let _ = tx.send(Command::OpenLink(url.to_string()));
+    });
+    let tx = sender.clone();
+    settings.on_logo_tapped(move || {
+        let _ = tx.send(Command::LogoTapped);
+    });
+    let tx = sender.clone();
+    settings.on_metrics_changed(move |width, height, logo| {
+        let _ = tx.send(Command::Metrics(
+            width.max(0) as u32,
+            height.max(0) as u32,
+            logo.max(0) as u32,
+        ));
+    });
+    let tx = sender.clone();
+    settings.on_reset_appearance(move || {
+        let _ = tx.send(Command::ResetAppearance);
+    });
+    let tx = sender.clone();
+    settings.on_reset_dev(move || {
+        let _ = tx.send(Command::ResetDev);
     });
     let weak = settings.as_weak();
     settings.on_dismiss(move || {
@@ -443,8 +464,25 @@ fn ensure_settings(
         }
         slint::CloseRequestResponse::HideWindow
     });
+    settings.set_tab_index(tab);
     shell.settings = Some(settings.clone_strong());
     Some(settings)
+}
+
+fn resize_settings(shell: &Shell, config: &config::Config) {
+    if let Some(settings) = &shell.settings {
+        settings.set_settings_width(config.settings_width as i32);
+        settings.set_settings_height(config.settings_height as i32);
+        settings.set_logo_size(config.logo_size as i32);
+        let _ = settings.window().with_winit_window(|window| {
+            window.set_min_inner_size(None::<winit::dpi::LogicalSize<f64>>);
+            window.set_max_inner_size(None::<winit::dpi::LogicalSize<f64>>);
+        });
+        settings.window().set_size(slint::LogicalSize::new(
+            config.settings_width as f32,
+            config.settings_height as f32,
+        ));
+    }
 }
 
 fn paint(shell: &Shell, state: &State) {
@@ -495,7 +533,45 @@ fn paint(shell: &Shell, state: &State) {
     }
     if let Some(settings) = &shell.settings {
         window_style!(settings);
+        settings.set_settings_width(cfg.settings_width as i32);
+        settings.set_settings_height(cfg.settings_height as i32);
+        settings.set_logo_size(cfg.logo_size as i32);
+        settings.set_dev_open(cfg.dev_tab);
+        if cfg.dev_tab {
+            let mut names = vec!["configure", "window-pin"];
+            for device in &cfg.devices {
+                if !names.contains(&device.kind.icon()) {
+                    names.push(device.kind.icon());
+                }
+            }
+            settings.set_dev_report(
+                names
+                    .into_iter()
+                    .map(|name| {
+                        format!(
+                            "{name}: {}",
+                            icons::source_format(name).unwrap_or_else(|| catalog.tr("Bundled"))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .into(),
+            );
+        }
+        let parts: Vec<_> = about::parts()
+            .into_iter()
+            .map(|part| Attribution {
+                name: part.name.into(),
+                upstream: part.upstream.into(),
+                detail: catalog.tr(&part.detail).into(),
+                url: part.url.into(),
+            })
+            .collect();
+        if !settings.get_parts().iter().eq(parts.iter().cloned()) {
+            settings.set_parts(ModelRc::new(VecModel::from(parts)));
+        }
         settings.set_version(env!("CARGO_PKG_VERSION").into());
+        settings.set_update_current(matches!(state.update, updates::Status::Current));
         settings.set_checking_update(matches!(state.update, updates::Status::Checking));
         settings.set_update_available(matches!(state.update, updates::Status::Available(_)));
         settings.set_update_status(
@@ -785,6 +861,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         pending_notifications: HashSet::new(),
         notification_error: String::new(),
         update: updates::Status::Idle,
+        logo_taps: about::LogoTaps::default(),
     }));
     let (sender, mut commands) = tokio::sync::mpsc::unbounded_channel();
     let (refresh, mut refresh_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -1035,12 +1112,48 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             });
                         }
                     }
-                    Command::OpenLink(index) => {
+                    Command::OpenLink(url) => {
                         let tx = update_tx.clone();
                         rt_handle.spawn(async move {
-                            let result = updates::open_link(index).await.map_err(|e| e.to_string());
+                            let result = updates::open_link(&url).await.map_err(|e| e.to_string());
                             let _ = tx.send(Event::LinkOpened(result));
                         });
+                    }
+                    Command::LogoTapped => {
+                        let mut state = data.borrow_mut();
+                        if state.logo_taps.push(Instant::now()) {
+                            state.config.dev_tab = !state.config.dev_tab;
+                            if !state.config.dev_tab {
+                                if let Some(settings) = &windows.settings {
+                                    if settings.get_tab_index() == 4 {
+                                        settings.set_tab_index(3);
+                                    }
+                                }
+                            }
+                            changed = true;
+                        }
+                    }
+                    Command::Metrics(width, height, logo) => {
+                        let mut state = data.borrow_mut();
+                        state.config.settings_width = width;
+                        state.config.settings_height = height;
+                        state.config.logo_size = logo;
+                        state.config.normalize_metrics();
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::ResetAppearance => {
+                        let mut state = data.borrow_mut();
+                        state.config.reset_appearance();
+                        state.catalog = i18n::Catalog::load(&state.config.language);
+                        resize_settings(&windows, &state.config);
+                        changed = true;
+                    }
+                    Command::ResetDev => {
+                        let mut state = data.borrow_mut();
+                        state.config.reset_dev();
+                        resize_settings(&windows, &state.config);
+                        changed = true;
                     }
                     Command::Quit => {
                         let _ = slint::quit_event_loop();

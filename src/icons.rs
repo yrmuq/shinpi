@@ -12,6 +12,13 @@ pub fn theme_icon(name: &str) -> Option<ThemeIcon> {
     Some(ThemeIcon { image, tint })
 }
 
+pub fn source_format(name: &str) -> Option<String> {
+    locate_icon(name)?
+        .extension()?
+        .to_str()
+        .map(str::to_uppercase)
+}
+
 fn locate_icon(name: &str) -> Option<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     let theme = icon_theme_name();

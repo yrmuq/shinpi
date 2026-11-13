@@ -61,14 +61,20 @@ pub fn check() -> Result<Option<String>, ()> {
     )
 }
 
-pub async fn open_link(index: i32) -> Result<(), zbus::Error> {
-    let url = match index {
-        0 => "https://github.com/yrmuq/shinpi",
-        1 => "https://github.com/yrmuq/shinpi/releases/latest",
-        2 => "https://slint.dev",
-        3 => "https://kde.org",
-        _ => return Ok(()),
-    };
+fn allowed_link(url: &str) -> bool {
+    [
+        "https://github.com/yrmuq/shinpi",
+        "https://github.com/yrmuq/shinpi/releases/latest",
+        "https://github.com/yrmuq/shinpi/blob/main/LICENSE",
+    ]
+    .contains(&url)
+        || crate::about::parts().iter().any(|part| part.url == url)
+}
+
+pub async fn open_link(url: &str) -> Result<(), zbus::Error> {
+    if !allowed_link(url) {
+        return Ok(());
+    }
     // Keep the client connected while the portal handles its asynchronous request.
     static CONNECTION: std::sync::OnceLock<zbus::Connection> = std::sync::OnceLock::new();
     let connection = if let Some(connection) = CONNECTION.get() {
@@ -92,6 +98,24 @@ pub async fn open_link(index: i32) -> Result<(), zbus::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_are_limited_to_the_application_and_readme_upstreams() {
+        for part in crate::about::parts() {
+            assert!(allowed_link(&part.url));
+        }
+        assert!(allowed_link(
+            "https://github.com/yrmuq/shinpi/releases/latest"
+        ));
+        for url in [
+            "file:///etc/passwd",
+            "https://github.com/yrmuq/shinpi.evil",
+            "https://example.com",
+            "javascript:alert(1)",
+        ] {
+            assert!(!allowed_link(url));
+        }
+    }
 
     #[test]
     fn only_newer_stable_versions_are_offered() {
