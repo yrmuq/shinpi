@@ -191,3 +191,48 @@ test('late window identity hides only tray panels and places them again when sho
         assert.equal(listeners.geometry.length, 1, 'identity signals do not duplicate tracking');
     }
 });
+
+test('native panel classes place recreated surfaces before captions and acknowledge ready rules', () => {
+    function signal() {
+        const handlers = new Set();
+        return { connect: fn => handlers.add(fn), disconnect: fn => handlers.delete(fn),
+            emit(...args) { for (const fn of [...handlers]) fn(...args); } };
+    }
+    const output = { geometry: { x: 0, y: 0, width: 1200, height: 800 } };
+    const panel = { dock: true, resourceClass: 'plasmashell', output,
+        frameGeometry: { x: 0, y: 760, width: 1200, height: 40 } };
+    const settings = { caption: 'shinpi', resourceClass: 'shinpi', skipTaskbar: false };
+    const live = [panel, settings], calls = [], added = signal(), changed = signal();
+    const ctx = vm.createContext({ shinpiReadyBus: ':1.42', options: { configChanged: changed },
+        callDBus: (...args) => calls.push(args), KWin: { MaximizeArea: 0 }, workspace: {
+            windowList: () => live, windowAdded: added, cursorPos: { x: 1050, y: 780 },
+            screenAt: () => output, clientArea: () => ({ x: 0, y: 0, width: 1200, height: 760 }),
+        } });
+    vm.runInContext(readFileSync(new URL('../kwin/placer.js', import.meta.url), 'utf8'), ctx);
+    for (let i = 0; i < 100; i++) {
+        const popup = { resourceClass: 'shinpi-popup-devices', resourceName: '', caption: 'Slint Window',
+            output, hidden: false, frameGeometry: { x: 420, y: 300, width: 360, height: 140 },
+            frameGeometryChanged: signal(), windowShown: signal(), closed: signal() };
+        live.push(popup); added.emit(popup);
+        assert.equal(popup.skipTaskbar, true, 'hide without waiting for the caption');
+        assert.equal(popup.noBorder, true);
+        assert.equal(popup.skipsCloseAnimation, true);
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        popup.hidden = true;
+        popup.frameGeometry = { ...popup.frameGeometry, x: 420, y: 300 };
+        popup.hidden = false; popup.windowShown.emit();
+        assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        const notice = { resourceClass: '', resourceName: 'shinpi-popup-notices', caption: '', output,
+            hidden: false, frameGeometry: { x: 420, y: 300, width: 360, height: 80 },
+            frameGeometryChanged: signal(), windowShown: signal(), closed: signal() };
+        live.push(notice); added.emit(notice);
+        assert.equal(notice.skipTaskbar, true);
+        assert.equal(notice.frameGeometry.y, popup.frameGeometry.y - 80);
+        assert.equal(notice.frameGeometry.x, popup.frameGeometry.x);
+        notice.closed.emit(); popup.closed.emit(); live.splice(2);
+    }
+    assert.equal(settings.skipTaskbar, false, 'only settings remain on the taskbar');
+    assert.equal(calls.length, 0);
+    changed.emit(); changed.emit();
+    assert.deepEqual(calls, [[':1.42', '/shinpi/Placer', 'io.github.yrmuq.shinpi.Placer', 'Ready']]);
+});

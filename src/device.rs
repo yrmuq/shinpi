@@ -102,8 +102,8 @@ impl Reading {
     pub fn band(&self) -> Option<Band> {
         self.percentage().map(|percent| match percent {
             100 => Band::Full,
-            51..=99 => Band::High,
-            26..=50 => Band::Medium,
+            50..=99 => Band::High,
+            26..=49 => Band::Medium,
             _ => Band::Low,
         })
     }
@@ -172,7 +172,8 @@ mod tests {
             (99, Band::High),
             (75, Band::High),
             (51, Band::High),
-            (50, Band::Medium),
+            (50, Band::High),
+            (49, Band::Medium),
             (26, Band::Medium),
             (25, Band::Low),
             (0, Band::Low),
@@ -205,7 +206,7 @@ mod tests {
         for (level, percent, band) in [
             ("Критический", 10, Band::Low),
             ("Низкий", 25, Band::Low),
-            ("Средний", 50, Band::Medium),
+            ("Средний", 50, Band::High),
             ("Высокий", 75, Band::High),
             ("Полный", 100, Band::Full),
         ] {

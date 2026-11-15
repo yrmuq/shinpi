@@ -4,7 +4,7 @@ use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 pub const DEFAULT_SETTINGS_WIDTH: u32 = 600;
 pub const DEFAULT_SETTINGS_HEIGHT: u32 = 630;
-pub const DEFAULT_LOGO_SIZE: u32 = 69;
+pub const DEFAULT_LOGO_SIZE: u32 = 100;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -320,7 +320,7 @@ mod tests {
                 restored.settings_height,
                 restored.logo_size
             ),
-            (600, 630, 69)
+            (600, 630, 100)
         );
         restored.auto_check_updates = false;
         restored.reset_appearance();

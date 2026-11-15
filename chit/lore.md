@@ -13,3 +13,5 @@
 ## Compatibility Workarounds
 
 - Recreate hidden window components before showing them again: Slint 1.18 resets native window attributes on Wayland hide, losing the class and initial title; remove this workaround only after verifying that the backend preserves both across hide/show.
+- Give device and notice panels distinct native classes and recognize them before captions arrive; Wayland title propagation can occur after the first KWin placement.
+- Wait for KWin rule reload acknowledgement and a subsequent round trip before exposing the tray item; reconfigure is asynchronous and an early click can precede the taskbar rules.
