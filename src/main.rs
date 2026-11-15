@@ -108,7 +108,8 @@ thread_local! {
     static LOCK_WINDOW_SIZE: Cell<bool> = const { Cell::new(true) };
 }
 
-const POPUP_CLASS: &str = "shinpi-popup";
+const POPUP_CLASS: &str = "shinpi-popup-devices";
+const NOTICES_CLASS: &str = "shinpi-popup-notices";
 
 fn window_attributes(
     attributes: winit::window::WindowAttributes,
@@ -117,15 +118,21 @@ fn window_attributes(
     use winit::platform::x11::{WindowAttributesExtX11, WindowType};
     let popup = !panel.is_empty();
     let attributes = attributes
-        .with_resizable(!LOCK_WINDOW_SIZE.get())
+        .with_resizable(!popup && !LOCK_WINDOW_SIZE.get())
         .with_transparent(popup)
         .with_title(if popup { panel } else { "shinpi" });
-    let class = if popup { POPUP_CLASS } else { "shinpi" };
+    let class = match panel {
+        "shinpi-devices" => POPUP_CLASS,
+        "shinpi-notices" => NOTICES_CLASS,
+        _ => "shinpi",
+    };
     let attributes = WindowAttributesExtX11::with_name(attributes, class, class);
     let attributes =
         winit::platform::wayland::WindowAttributesExtWayland::with_name(attributes, class, class);
     if popup {
-        attributes.with_x11_window_type(vec![WindowType::PopupMenu])
+        attributes
+            .with_decorations(false)
+            .with_x11_window_type(vec![WindowType::PopupMenu])
     } else {
         attributes
     }
@@ -963,6 +970,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let initial_summary = state.borrow().catalog.tr("Scanning for devices…");
     let initial_labels =
         ["Refresh", "Settings", "Quit"].map(|label| state.borrow().catalog.tr(label));
+    if !runtime.block_on(place::install()) {
+        eprintln!("shinpi: KWin positioning unavailable; using compositor placement");
+    }
     let tray = runtime.block_on(async {
         use ksni::TrayMethods;
         tray::Tray {
@@ -985,9 +995,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .spawn()
         .await
     })?;
-    if !runtime.block_on(place::install()) {
-        eprintln!("shinpi: KWin positioning unavailable; using compositor placement");
-    }
     let notification_tx = results_tx.clone();
     let update_tx = results_tx.clone();
     runtime.spawn(async move {
@@ -1487,12 +1494,15 @@ mod window_tests {
         let notices =
             window_attributes(winit::window::WindowAttributes::default(), "shinpi-notices");
         assert_eq!(notices.title, "shinpi-notices");
-        assert!(notices.transparent && !notices.resizable);
+        assert!(notices.transparent && !notices.resizable && !notices.decorations);
+        assert!(!popup.decorations && settings.decorations);
         assert!(!popup.resizable && !settings.resizable);
         assert!(popup.transparent && !settings.transparent);
         LOCK_WINDOW_SIZE.set(false);
         let unlocked = window_attributes(winit::window::WindowAttributes::default(), "");
         assert!(unlocked.resizable);
+        let popup = window_attributes(winit::window::WindowAttributes::default(), "shinpi-devices");
+        assert!(!popup.resizable && !popup.decorations);
         LOCK_WINDOW_SIZE.set(true);
     }
 }

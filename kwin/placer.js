@@ -7,9 +7,16 @@ function textOf(value) {
     return value == null ? "" : String(value);
 }
 
+function classesOf(window) {
+    return (textOf(window.resourceClass) + " " + textOf(window.resourceName)).split(/\s+/);
+}
+
+function isPopupClass(window) {
+    return classesOf(window).some((name) => ["shinpi-popup", "shinpi-popup-devices", "shinpi-popup-notices"].includes(name));
+}
+
 function isOurs(window) {
-    const classes = (textOf(window.resourceClass) + " " + textOf(window.resourceName)).split(/\s+/);
-    return !window.dialog && (classes.includes("shinpi") || classes.includes("shinpi-popup"));
+    return !window.dialog && (classesOf(window).includes("shinpi") || isPopupClass(window));
 }
 
 function captionOf(window) {
@@ -17,11 +24,11 @@ function captionOf(window) {
 }
 
 function isPopup(window) {
-    return isOurs(window) && captionOf(window) === "shinpi-devices";
+    return isOurs(window) && (classesOf(window).includes("shinpi-popup-devices") || captionOf(window) === "shinpi-devices");
 }
 
 function isNotice(window) {
-    return isOurs(window) && captionOf(window) === "shinpi-notices";
+    return isOurs(window) && (classesOf(window).includes("shinpi-popup-notices") || captionOf(window) === "shinpi-notices");
 }
 
 function visibleNotices() {
@@ -50,6 +57,8 @@ function hideFromTaskbar(window) {
     window.skipTaskbar = true;
     window.skipSwitcher = true;
     window.skipPager = true;
+    window.noBorder = true;
+    window.skipsCloseAnimation = true;
 }
 
 function contains(rect, point) {
@@ -231,7 +240,7 @@ function trackNotice(window) {
 
 function arm(window) {
     const identify = () => {
-        if (isOurs(window) && String(window.resourceClass) === "shinpi-popup") {
+        if (isOurs(window) && isPopupClass(window)) {
             hideFromTaskbar(window);
         }
         track(window);
@@ -244,3 +253,11 @@ function arm(window) {
 }
 workspace.windowAdded.connect(arm);
 workspace.windowList().forEach(arm);
+
+if (typeof shinpiReadyBus !== "undefined") {
+    function shinpiRulesReloaded() {
+        options.configChanged.disconnect(shinpiRulesReloaded);
+        callDBus(shinpiReadyBus, "/shinpi/Placer", "io.github.yrmuq.shinpi.Placer", "Ready");
+    }
+    options.configChanged.connect(shinpiRulesReloaded);
+}

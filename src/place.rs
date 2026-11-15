@@ -3,8 +3,18 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const SCRIPT: &str = include_str!("../kwin/placer.js");
+
+struct RuleReload(tokio::sync::mpsc::UnboundedSender<()>);
+
+#[zbus::interface(name = "io.github.yrmuq.shinpi.Placer")]
+impl RuleReload {
+    fn ready(&self) {
+        let _ = self.0.send(());
+    }
+}
 
 pub async fn install() -> bool {
     let Ok(conn) = zbus::Connection::session().await else {
@@ -28,7 +38,21 @@ pub async fn install() -> bool {
         return false;
     }
     let path = folder.join("placer.js");
-    if fs::write(&path, SCRIPT).is_err() {
+    let (ready, mut reloaded) = tokio::sync::mpsc::unbounded_channel();
+    if conn
+        .object_server()
+        .at("/shinpi/Placer", RuleReload(ready))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    let Some(destination) = conn.unique_name() else {
+        return false;
+    };
+    let destination = serde_json::to_string(destination.as_str()).unwrap();
+    let script = format!("const shinpiReadyBus = {destination};\n{SCRIPT}");
+    if fs::write(&path, script).is_err() {
         return false;
     }
     let _ = conn
@@ -63,17 +87,8 @@ pub async fn install() -> bool {
         .unwrap_or_default()
         .as_nanos();
     let name = format!("shinpiplace{}_{stamp}", std::process::id());
-    let rules_changed = write_taskbar_rule();
-    if rules_changed {
-        let _ = conn
-            .call_method(
-                Some("org.kde.KWin"),
-                "/KWin",
-                Some("org.kde.KWin"),
-                "reconfigure",
-                &(),
-            )
-            .await;
+    if !write_taskbar_rule() {
+        return false;
     }
     let reply = conn
         .call_method(
@@ -102,7 +117,38 @@ pub async fn install() -> bool {
     if ran {
         let _ = fs::write(name_path, name);
     }
-    ran
+    if !ran
+        || conn
+            .call_method(
+                Some("org.kde.KWin"),
+                "/KWin",
+                Some("org.kde.KWin"),
+                "reconfigure",
+                &(),
+            )
+            .await
+            .is_err()
+    {
+        return false;
+    }
+    if tokio::time::timeout(Duration::from_secs(5), reloaded.recv())
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return false;
+    }
+    // configChanged precedes rule loading; this round trip waits for it to finish.
+    conn.call_method(
+        Some("org.kde.KWin"),
+        "/KWin",
+        Some("org.kde.KWin"),
+        "supportInformation",
+        &(),
+    )
+    .await
+    .is_ok()
 }
 
 const TASKBAR_RULE: &str = "\
@@ -114,13 +160,14 @@ skippager=true
 skippagerrule=2
 skipswitcher=true
 skipswitcherrule=2
-wmclass=shinpi-popup
-wmclassmatch=1
+wmclass=^shinpi-popup(-devices|-notices)?$
+wmclassmatch=3
 wmclasscomplete=false
+noborder=true
+noborderrule=2
 ";
 
-/// KWin applies window rules while the window is created. The popup class is
-/// set before mapping, before a title exists, so the task manager never sees it.
+/// Rules must be ready before tray surfaces can be created, even on a warm start.
 fn write_taskbar_rule() -> bool {
     let path = crate::config::config_dir()
         .parent()
@@ -132,7 +179,7 @@ fn write_taskbar_rule() -> bool {
         Err(_) => return false,
     };
     let Some(next) = merge_kwin_rules(&previous) else {
-        return false;
+        return true;
     };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -172,8 +219,10 @@ fn rewrite_tray_rule(text: &str) -> String {
 }
 fn merge_kwin_rules(text: &str) -> Option<String> {
     if text.contains("[shinpi-tray]") {
-        if text.contains("wmclass=shinpi-popup\n")
-            && text.contains("wmclassmatch=1\n")
+        if text.contains("wmclass=^shinpi-popup(-devices|-notices)?$\n")
+            && text.contains("wmclassmatch=3\n")
+            && text.contains("noborder=true\n")
+            && text.contains("noborderrule=2\n")
             && !text.contains("title=")
         {
             return None;
@@ -249,20 +298,25 @@ mod tests {
         assert!(first.contains("rules=1,shinpi-tray\n"));
         assert!(first.contains("count=2\n"));
         assert!(first.contains("skiptaskbar=true\n"));
-        assert!(first.contains("wmclass=shinpi-popup\n"));
-        assert!(first.contains("wmclassmatch=1\n"));
+        assert!(first.contains("wmclass=^shinpi-popup(-devices|-notices)?$\n"));
+        assert!(first.contains("wmclassmatch=3\n"));
+        assert!(first.contains("noborder=true\n"));
         assert!(!first.contains("title="));
         assert!(merge_kwin_rules(&first).is_none());
         let stale = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nwmclass=shinpi\nskiptaskbar=true\n";
         let updated = merge_kwin_rules(stale).unwrap();
-        assert!(updated.contains("wmclass=shinpi-popup\n"));
+        assert!(updated.contains("wmclass=^shinpi-popup(-devices|-notices)?$\n"));
         assert!(!updated.contains("wmclass=shinpi\n"));
         assert!(merge_kwin_rules(&updated).is_none());
         let old = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nDescription=shinpi tray popup\ntitle=shinpi-(devices|notices)\ntitlematch=3\nwmclass=shinpi\nwmclassmatch=1\n";
         let fixed = merge_kwin_rules(old).unwrap();
-        assert!(fixed.contains("wmclass=shinpi-popup\n"));
+        assert!(fixed.contains("wmclass=^shinpi-popup(-devices|-notices)?$\n"));
         assert!(!fixed.contains("title="));
         assert!(merge_kwin_rules(&fixed).is_none());
+        let previous = "[General]\nrules=shinpi-tray\ncount=1\n\n[shinpi-tray]\nwmclass=shinpi-popup\nwmclassmatch=1\n";
+        let migrated = merge_kwin_rules(previous).unwrap();
+        assert!(migrated.contains("wmclass=^shinpi-popup(-devices|-notices)?$\n"));
+        assert!(merge_kwin_rules(&migrated).is_none());
         let empty = merge_kwin_rules("").unwrap();
         assert!(empty.contains("[shinpi-tray]\n"));
         assert!(empty.contains("rules=shinpi-tray\n"));
