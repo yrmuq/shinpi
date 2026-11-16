@@ -6,6 +6,10 @@
 - Keep the About attribution table limited to Component, Upstream and Integration Details, matching yoin's dev UI; the user explicitly excluded a License column.
 - Appearance Reset preserves devices, saved readings, notification timestamps, history, notification rules and the update-check preference; Dev Reset restores window dimensions, logo size, the resize lock and automatic update checks.
 
+- Battery polling and low-charge notifications continue while all application windows are closed.
+- Reclaim hidden UI components without losing the selected settings tab or popup pin state; periodic UI refreshes must only visit visible windows.
+- Reuse decoded SVG images through a bounded cache so repeated refreshes do not retain an unbounded set of images.
+
 ## External Compatibility Constraints
 
 - `flatpak-builder --run` rejects `--user`; the sandbox launch check passes only `--arch`, because that mode has a separate option table from the build command.

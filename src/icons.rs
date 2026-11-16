@@ -1,6 +1,45 @@
 // Copyright (C) 2026 yrmuq.
 // SPDX-License-Identifier: GPL-3.0-or-later
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+
+const SVG_CACHE_LIMIT: usize = 16;
+const SVG_CACHE_BYTES: usize = 256 * 1024;
+
+thread_local! {
+    static SVG_IMAGES: RefCell<Vec<(Vec<u8>, slint::Image)>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn svg_image(data: &[u8]) -> Option<slint::Image> {
+    cached_svg(data, || slint::Image::load_from_svg_data(data).ok())
+}
+
+fn cached_svg(data: &[u8], decode: impl FnOnce() -> Option<slint::Image>) -> Option<slint::Image> {
+    if let Some(image) = SVG_IMAGES.with(|images| {
+        images
+            .borrow()
+            .iter()
+            .find(|(source, _)| source.as_slice() == data)
+            .map(|(_, image)| image.clone())
+    }) {
+        return Some(image);
+    }
+    let image = decode()?;
+    if data.len() <= SVG_CACHE_BYTES {
+        SVG_IMAGES.with(|images| {
+            let mut images = images.borrow_mut();
+            while images.len() >= SVG_CACHE_LIMIT
+                || images.iter().map(|(source, _)| source.len()).sum::<usize>() + data.len()
+                    > SVG_CACHE_BYTES
+            {
+                images.remove(0);
+            }
+            images.push((data.to_vec(), image.clone()));
+        });
+    }
+    Some(image)
+}
+
 pub struct ThemeIcon {
     pub image: slint::Image,
     pub tint: bool,
@@ -237,7 +276,7 @@ fn should_tint(path: &Path) -> bool {
 
 fn load_slint_image(path: &Path) -> Option<slint::Image> {
     if path.extension()?.to_str()? == "svg" {
-        slint::Image::load_from_svg_data(&std::fs::read(path).ok()?).ok()
+        svg_image(&std::fs::read(path).ok()?)
     } else {
         slint::Image::load_from_path(path).ok()
     }
@@ -337,6 +376,46 @@ pub fn tray(
 mod tests {
     use super::*;
     use crate::device::Band;
+
+    #[test]
+    fn svg_cache_reuses_images_and_bounds_retained_data() {
+        SVG_IMAGES.with(|images| images.borrow_mut().clear());
+        let loads = std::cell::Cell::new(0);
+        let decode = || {
+            loads.set(loads.get() + 1);
+            Some(slint::Image::default())
+        };
+        assert!(cached_svg(b"first", decode).is_some());
+        assert!(cached_svg(b"first", decode).is_some());
+        assert_eq!(loads.get(), 1);
+        for index in 0..=SVG_CACHE_LIMIT {
+            assert!(cached_svg(&[index as u8], decode).is_some());
+        }
+        SVG_IMAGES.with(|images| assert_eq!(images.borrow().len(), SVG_CACHE_LIMIT));
+        let before = loads.get();
+        assert!(cached_svg(b"first", decode).is_some());
+        assert_eq!(loads.get(), before + 1);
+        let oversized = vec![0; SVG_CACHE_BYTES + 1];
+        let before = loads.get();
+        assert!(cached_svg(&oversized, decode).is_some());
+        assert!(cached_svg(&oversized, decode).is_some());
+        assert_eq!(loads.get(), before + 2);
+        let large = vec![1; SVG_CACHE_BYTES / 2 + 1];
+        let other = vec![2; SVG_CACHE_BYTES / 2 + 1];
+        assert!(cached_svg(&large, decode).is_some());
+        assert!(cached_svg(&other, decode).is_some());
+        SVG_IMAGES.with(|images| assert_eq!(images.borrow().len(), 1));
+        assert!(cached_svg(b"invalid", || None).is_none());
+        SVG_IMAGES.with(|images| {
+            let images = images.borrow();
+            assert!(images.len() <= SVG_CACHE_LIMIT);
+            assert!(
+                images.iter().map(|(source, _)| source.len()).sum::<usize>() <= SVG_CACHE_BYTES
+            );
+            assert!(!images.iter().any(|(source, _)| source == b"invalid"));
+        });
+        SVG_IMAGES.with(|images| images.borrow_mut().clear());
+    }
     #[test]
     fn tray_raster_has_all_orientations_and_theme_contrast() {
         for orientation in 0..4 {

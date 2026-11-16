@@ -101,6 +101,62 @@ struct Shell {
     popup: Option<Popup>,
     settings: Option<Settings>,
     notices: Option<Notices>,
+    settings_tab: i32,
+    popup_pinned: bool,
+}
+
+impl Shell {
+    fn is_empty(&self) -> bool {
+        self.popup.is_none() && self.settings.is_none() && self.notices.is_none()
+    }
+
+    fn visible(&self) -> Self {
+        Self {
+            popup: self
+                .popup
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            settings: self
+                .settings
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            notices: self
+                .notices
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            ..Self::default()
+        }
+    }
+
+    fn release_hidden(&mut self) {
+        if let Some(settings) = &self.settings {
+            if !settings.window().is_visible() {
+                self.settings_tab = settings.get_tab_index();
+                self.settings = None;
+            }
+        }
+        if self
+            .notices
+            .as_ref()
+            .is_some_and(|window| !window.window().is_visible())
+        {
+            self.notices = None;
+        }
+        // Keep the notice close animation alive before releasing its parent panel.
+        if self.notices.is_none()
+            && self
+                .popup
+                .as_ref()
+                .is_some_and(|window| !window.window().is_visible())
+        {
+            if let Some(popup) = self.popup.take() {
+                self.popup_pinned = popup.get_pinned();
+            }
+        }
+    }
 }
 
 thread_local! {
@@ -149,7 +205,7 @@ fn ensure_popup(
         }
         popup.get_pinned()
     } else {
-        false
+        shell.popup_pinned
     };
     // Slint 1.18 discards native attributes on Wayland hide; recreate the panel adapter.
     shell.notices = None;
@@ -361,7 +417,7 @@ fn ensure_settings(
         }
         settings.get_tab_index()
     } else {
-        0
+        shell.settings_tab
     };
     shell.settings = None;
     let settings = Settings::new()
@@ -544,16 +600,22 @@ fn resize_settings(shell: &Shell, config: &config::Config) {
 }
 
 fn paint(shell: &Shell, state: &State) {
+    if shell.is_empty() {
+        return;
+    }
     let cfg = &state.config;
     let catalog = &state.catalog;
-    let labels = ModelRc::new(VecModel::from(catalog.labels()));
+    let labels = catalog.labels();
     let palette = theme::system_palette(&cfg.theme);
     let dark = theme::resolved(&cfg.theme, theme::system_dark()) == "dark";
     let font = theme::system_font();
     macro_rules! window_style {
         ($window:expr) => {{
             let window = $window;
-            window.global::<Translations>().set_strings(labels.clone());
+            let translations = window.global::<Translations>();
+            if !translations.get_strings().iter().eq(labels.iter().cloned()) {
+                translations.set_strings(ModelRc::new(VecModel::from(labels.clone())));
+            }
             window.set_dark(dark);
             window.set_ui_font_family(font.family.clone().into());
             // Slint applies DPI scaling; rounding before mapping changed the font on the next repaint.
@@ -683,7 +745,9 @@ fn paint(shell: &Shell, state: &State) {
                 .iter()
                 .map(|name| slint::SharedString::from(i18n::language_label(name))),
         );
-        settings.set_language_names(ModelRc::new(VecModel::from(names)));
+        if !settings.get_language_names().iter().eq(names.iter().cloned()) {
+            settings.set_language_names(ModelRc::new(VecModel::from(names)));
+        }
         settings.set_language_index(if cfg.language.is_empty() {
             0
         } else {
@@ -705,7 +769,7 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_repeat_minutes(cfg.repeat_minutes as i32);
         let svg = icons::tray_svg(cfg.minimum(), cfg.tray_orientation, cfg.colored_icon, dark);
         settings
-            .set_tray_preview(slint::Image::load_from_svg_data(svg.as_bytes()).unwrap_or_default());
+            .set_tray_preview(icons::svg_image(svg.as_bytes()).unwrap_or_default());
     }
 }
 
@@ -729,7 +793,7 @@ fn row(
                 device::Kind::Other => include_bytes!("../ui/icons/battery.svg"),
             };
             (
-                slint::Image::load_from_svg_data(data).unwrap_or_default(),
+                icons::svg_image(data).unwrap_or_default(),
                 true,
             )
         }
@@ -760,7 +824,7 @@ fn row(
 }
 
 fn fill(shell: &Shell, state: &State) {
-    if shell.popup.is_none() && shell.settings.is_none() {
+    if shell.is_empty() {
         return;
     }
     let rows: Vec<_> = state
@@ -770,7 +834,9 @@ fn fill(shell: &Shell, state: &State) {
         .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true, &state.catalog))
         .collect();
     if let Some(popup) = &shell.popup {
-        popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+        if !popup.get_rows().iter().eq(rows.iter().cloned()) {
+            popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+        }
         popup.set_busy(state.busy);
     }
     if let Some(notices) = &shell.notices {
@@ -783,26 +849,29 @@ fn fill(shell: &Shell, state: &State) {
             .history
             .len()
             .saturating_sub(state.config.history_count as usize);
-        notices.set_notes(ModelRc::new(VecModel::from(
-            state
-                .config
-                .history
-                .iter()
-                .enumerate()
-                .skip(first)
-                .map(|(index, note)| NoticeRow {
-                    index: index as i32,
-                    message: note.message.clone().into(),
-                    when: notices::ago(note.at, now, &state.catalog).into(),
-                    fade: note.fade,
-                })
-                .collect::<Vec<_>>(),
-        )));
+        let notes: Vec<_> = state
+            .config
+            .history
+            .iter()
+            .enumerate()
+            .skip(first)
+            .map(|(index, note)| NoticeRow {
+                index: index as i32,
+                message: note.message.clone().into(),
+                when: notices::ago(note.at, now, &state.catalog).into(),
+                fade: note.fade,
+            })
+            .collect();
+        if !notices.get_notes().iter().eq(notes.iter().cloned()) {
+            notices.set_notes(ModelRc::new(VecModel::from(notes)));
+        }
     }
     let Some(settings) = &shell.settings else {
         return;
     };
-    settings.set_rows(ModelRc::new(VecModel::from(rows)));
+    if !settings.get_rows().iter().eq(rows.iter().cloned()) {
+        settings.set_rows(ModelRc::new(VecModel::from(rows)));
+    }
     let candidates: Vec<_> = state
         .scan
         .devices
@@ -818,7 +887,9 @@ fn fill(shell: &Shell, state: &State) {
             )
         })
         .collect();
-    settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
+    if !settings.get_found_rows().iter().eq(candidates.iter().cloned()) {
+        settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
+    }
     settings.set_busy(state.busy);
     let mut diagnostics: Vec<_> = state
         .scan
@@ -847,12 +918,13 @@ fn fill(shell: &Shell, state: &State) {
     if diagnostics.is_empty() {
         diagnostics.push(state.catalog.tr("All sources have been scanned."));
     }
-    settings.set_diagnostics(ModelRc::new(VecModel::from(
-        diagnostics
-            .into_iter()
-            .map(slint::SharedString::from)
-            .collect::<Vec<_>>(),
-    )));
+    let diagnostics: Vec<_> = diagnostics
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect();
+    if !settings.get_diagnostics().iter().eq(diagnostics.iter().cloned()) {
+        settings.set_diagnostics(ModelRc::new(VecModel::from(diagnostics)));
+    }
 }
 
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
@@ -1038,6 +1110,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_millis(60),
         move || {
             let mut windows = tick_shell.borrow_mut();
+            windows.release_hidden();
             let mut changed = false;
             let mut redraw = false;
             while let Ok(command) = commands.try_recv() {
@@ -1411,8 +1484,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if changed || redraw || last_theme.get().elapsed() >= Duration::from_secs(2) {
                 last_theme.set(Instant::now());
                 let state = data.borrow();
-                paint(&windows, &state);
-                fill(&windows, &state);
+                let visible = windows.visible();
+                paint(&visible, &state);
+                fill(&visible, &state);
             }
             {
                 let state = data.borrow();
