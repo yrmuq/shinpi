@@ -745,7 +745,11 @@ fn paint(shell: &Shell, state: &State) {
                 .iter()
                 .map(|name| slint::SharedString::from(i18n::language_label(name))),
         );
-        if !settings.get_language_names().iter().eq(names.iter().cloned()) {
+        if !settings
+            .get_language_names()
+            .iter()
+            .eq(names.iter().cloned())
+        {
             settings.set_language_names(ModelRc::new(VecModel::from(names)));
         }
         settings.set_language_index(if cfg.language.is_empty() {
@@ -768,8 +772,7 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_threshold(i32::from(cfg.low_threshold));
         settings.set_repeat_minutes(cfg.repeat_minutes as i32);
         let svg = icons::tray_svg(cfg.minimum(), cfg.tray_orientation, cfg.colored_icon, dark);
-        settings
-            .set_tray_preview(icons::svg_image(svg.as_bytes()).unwrap_or_default());
+        settings.set_tray_preview(icons::svg_image(svg.as_bytes()).unwrap_or_default());
     }
 }
 
@@ -792,10 +795,7 @@ fn row(
                 device::Kind::Gamepad => include_bytes!("../ui/icons/input-gaming.svg"),
                 device::Kind::Other => include_bytes!("../ui/icons/battery.svg"),
             };
-            (
-                icons::svg_image(data).unwrap_or_default(),
-                true,
-            )
+            (icons::svg_image(data).unwrap_or_default(), true)
         }
     };
     DeviceRow {
@@ -887,7 +887,11 @@ fn fill(shell: &Shell, state: &State) {
             )
         })
         .collect();
-    if !settings.get_found_rows().iter().eq(candidates.iter().cloned()) {
+    if !settings
+        .get_found_rows()
+        .iter()
+        .eq(candidates.iter().cloned())
+    {
         settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
     }
     settings.set_busy(state.busy);
@@ -922,7 +926,11 @@ fn fill(shell: &Shell, state: &State) {
         .into_iter()
         .map(slint::SharedString::from)
         .collect();
-    if !settings.get_diagnostics().iter().eq(diagnostics.iter().cloned()) {
+    if !settings
+        .get_diagnostics()
+        .iter()
+        .eq(diagnostics.iter().cloned())
+    {
         settings.set_diagnostics(ModelRc::new(VecModel::from(diagnostics)));
     }
 }
