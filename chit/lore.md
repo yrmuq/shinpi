@@ -9,6 +9,8 @@
 ## External Compatibility Constraints
 
 - `flatpak-builder --run` rejects `--user`; the sandbox launch check passes only `--arch`, because that mode has a separate option table from the build command.
+- Preserve KWin's `Order` when present and remove legacy `rules`/`count` there: Plasma 6.8 migrates a non-empty legacy list by deleting every unlisted rule group, even those listed in `Order`.
+- Preserve other KWin rule sections and their order; keep a non-overwritten backup before changing `kwinrulesrc`, and abort on read or backup errors.
 
 ## Compatibility Workarounds
 
