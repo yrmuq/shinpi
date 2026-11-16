@@ -1489,14 +1489,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     settings.set_error(error.into());
                 }
             }
-            if changed || redraw || last_theme.get().elapsed() >= Duration::from_secs(2) {
+            let periodic = last_theme.get().elapsed() >= Duration::from_secs(2);
+            let refresh_ui = changed || redraw || periodic;
+            if refresh_ui {
                 last_theme.set(Instant::now());
                 let state = data.borrow();
                 let visible = windows.visible();
                 paint(&visible, &state);
                 fill(&visible, &state);
             }
-            {
+            if refresh_ui {
                 let state = data.borrow();
                 let cfg = &state.config;
                 let signature = (
