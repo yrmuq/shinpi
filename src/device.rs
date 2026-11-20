@@ -186,15 +186,23 @@ fn usb_hid_key(id: &str) -> Option<(String, u32)> {
                 && suffix.len() >= 4
                 && hex(suffix)
             {
-                instance = u32::from_str_radix(suffix, 16).ok();
-                Some(name)
+                u32::from_str_radix(suffix, 16)
+                    .ok()
+                    .map(|value| (name, value))
             } else {
                 None
             }
         });
-        // Linux appends an enumeration counter to each USB HID device name.
         key.push('/');
-        key.push_str(stable.unwrap_or(segment));
+        if let Some((name, value)) = stable {
+            // Child HID devices can share a receiver and model without being the same device.
+            if instance.replace(value).is_some() {
+                return None;
+            }
+            key.push_str(name);
+        } else {
+            key.push_str(segment);
+        }
     }
     Some((key, instance?))
 }
@@ -288,6 +296,8 @@ mod tests {
         assert!(!current.matches_id(&old.id.replace("1.0", "1.1")));
         assert!(!current.matches_id(&old.id.replace("C53F", "C540")));
         assert!(!current.matches_id(&old.id.replace("UPower:", "Linux power_supply:")));
+        let child = format!("UPower:{port}.000A/0003:046D:4080");
+        assert!(!same_id(&format!("{child}.000B"), &format!("{child}.000C")));
 
         // The scan also keeps the serial-based ID if only the path record has fresh data.
         old.updated_at = 102;
