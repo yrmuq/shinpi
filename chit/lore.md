@@ -9,6 +9,7 @@
 - Battery polling and low-charge notifications continue while all application windows are closed.
 - Reclaim hidden UI components without losing the selected settings tab or popup pin state; periodic UI refreshes must only visit visible windows.
 - Reuse decoded SVG images through a bounded cache so repeated refreshes do not retain an unbounded set of images.
+- Treat the USB HID instance counter as transient across reconnects and keep device selections separate by source, USB port and interface when a hardware address or serial is unavailable.
 
 ## External Compatibility Constraints
 

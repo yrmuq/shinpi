@@ -882,7 +882,12 @@ fn fill(shell: &Shell, state: &State) {
                 d.kind,
                 &d.reading,
                 &d.source,
-                state.config.devices.iter().any(|s| s.id == d.id),
+                state.config.devices.iter().any(|s| {
+                    state
+                        .scan
+                        .find(&s.id)
+                        .is_some_and(|row| std::ptr::eq(row, d))
+                }),
                 &state.catalog,
             )
         })

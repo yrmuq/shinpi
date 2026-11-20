@@ -30,7 +30,7 @@ fn blocked(config: &Config, selected: &Selected, fresh: &Scan, now: u64) -> Opti
     if !config.notifications {
         return Some("Notifications are disabled.");
     }
-    let Some(device) = fresh.devices.iter().find(|d| d.id == selected.id) else {
+    let Some(device) = fresh.find(&selected.id) else {
         return Some("No current reading from the selected source.");
     };
     if device.reading.charging {
@@ -65,9 +65,7 @@ pub fn diagnostics(
         .iter()
         .map(|selected| {
             let reading = fresh
-                .devices
-                .iter()
-                .find(|d| d.id == selected.id)
+                .find(&selected.id)
                 .map(|d| catalog.reading(&d.reading))
                 .unwrap_or_else(|| catalog.tr("No data"));
             catalog.trf(

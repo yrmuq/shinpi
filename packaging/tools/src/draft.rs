@@ -54,7 +54,6 @@ pub fn update(context: &Context) -> Result<()> {
     let mut assets = vec![
         "dist/shinpi-x86_64.AppImage",
         "dist/shinpi-x86_64.AppImage.sha256",
-        "dist/shinpi-x86_64.AppImage.zsync",
     ];
     if std::env::var("INCLUDE_FLATPAK").as_deref() == Ok("true") {
         assets.extend([
@@ -106,7 +105,7 @@ pub fn update(context: &Context) -> Result<()> {
     args.extend(assets.iter().copied());
     args.extend(["--repo", &repo, "--clobber"]);
     context.run("gh", &args)?;
-    // Ordinary builds remove optional packages left by a previous test build.
+    // Remove assets left by previous builds when they are absent from this one.
     let previous = context.api(
         &format!("repos/{repo}/releases/{}/assets", id(&release["id"])?),
         "GET",

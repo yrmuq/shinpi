@@ -147,10 +147,9 @@ impl Fixture {
 
     fn assets(&self) {
         self.write("dist/shinpi-x86_64.AppImage", "image");
-        self.write("dist/shinpi-x86_64.AppImage.zsync", "zsync");
         let output = Command::new("sha256sum")
             .current_dir(self.root.join("dist"))
-            .args(["shinpi-x86_64.AppImage", "shinpi-x86_64.AppImage.zsync"])
+            .arg("shinpi-x86_64.AppImage")
             .output()
             .unwrap();
         self.write(
@@ -546,12 +545,13 @@ fn ordinary_build_removes_previous_optional_bundle() {
     );
     fixture.write(
         "assets.json",
-        r#"[{"name":"shinpi-x86_64.flatpak","id":8},{"name":"shinpi-x86_64.AppImage","id":9}]"#,
+        r#"[{"name":"shinpi-x86_64.flatpak","id":8},{"name":"shinpi-x86_64.AppImage","id":9},{"name":"shinpi-x86_64.AppImage.zsync","id":10}]"#,
     );
     fixture.run(&["draft"]);
     let log = fixture.read("gh.log");
     assert!(log.contains("releases/assets/8 --method DELETE"));
     assert!(!log.contains("releases/assets/9 --method DELETE"));
+    assert!(log.contains("releases/assets/10 --method DELETE"));
     assert!(!log
         .lines()
         .find(|line| line.starts_with("release upload"))
