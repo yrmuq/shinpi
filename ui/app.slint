@@ -43,10 +43,11 @@ export struct DeviceRow {
 }
 
 export struct NoticeRow {
-    index: int,
+    id: int,
     message: string,
     when: string,
-    fade: float,
+    closing: bool,
+    test: bool,
 }
 
 export struct Attribution {
@@ -329,33 +330,28 @@ export component Notices inherits Window {
                 spacing: 1px;
                 for note in root.notes: Rectangle {
                     height: 71px;
-                    clip: true;
-                    Rectangle {
-                        y: (1 - note.fade) * 71px;
-                        width: parent.width;
+                    opacity: note.closing ? 0 : 1;
+                    animate opacity { duration: 120ms; easing: ease-out; }
+                    background: Breeze.window;
+                    border-radius: Breeze.radius;
+                    border-width: 1px;
+                    border-color: Breeze.frame;
+                    VerticalLayout {
+                        x: 8px;
+                        width: parent.width - 40px;
                         height: parent.height;
-                        opacity: note.fade;
-                        animate opacity, y { duration: 60ms; }
-                        background: Breeze.window;
-                        border-radius: Breeze.radius;
-                        border-width: 1px;
-                        border-color: Breeze.frame;
-                        VerticalLayout {
-                            x: 8px;
-                            width: parent.width - 40px;
-                            height: parent.height;
-                            alignment: center;
-                            spacing: 0px;
-                            Text { text: Translations.tr(7); color: Breeze.fg; font-weight: 600; overflow: elide; min-width: 0px; height: 18px; }
-                            Text { text: note.message; color: Breeze.fg; overflow: elide; min-width: 0px; height: 18px; }
-                            Text { text: note.when; color: Breeze.inactive; overflow: elide; min-width: 0px; font-size: root.ui-font-size * 0.85; height: 16px; }
-                        }
-                        ToolButton {
-                            x: parent.width - 32px;
-                            label: Translations.tr(8);
-                            clicked => { root.dismiss-note(note.index); }
-                            Text { text: "×"; color: Breeze.inactive; font-size: 18px; }
-                        }
+                        alignment: center;
+                        spacing: 0px;
+                        Text { text: Translations.tr(note.test ? 134 : 7); color: Breeze.fg; font-weight: 600; overflow: elide; min-width: 0px; height: 18px; }
+                        Text { text: note.message; color: Breeze.fg; overflow: elide; min-width: 0px; height: 18px; }
+                        Text { text: note.when; color: Breeze.inactive; overflow: elide; min-width: 0px; font-size: root.ui-font-size * 0.85; height: 16px; }
+                    }
+                    ToolButton {
+                        x: parent.width - self.width;
+                        y: (parent.height - self.height) / 2;
+                        label: Translations.tr(8);
+                        clicked => { root.dismiss-note(note.id); }
+                        Text { text: "×"; color: Breeze.inactive; font-size: 18px; }
                     }
                 }
             }

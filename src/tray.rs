@@ -33,7 +33,7 @@ pub enum Command {
     PanelWidth(u32),
     HistoryCount(u32),
     ToggleHistory,
-    DismissNotice(usize),
+    DismissNotice(i32),
 }
 
 pub struct Tray {

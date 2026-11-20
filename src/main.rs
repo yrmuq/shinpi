@@ -310,9 +310,10 @@ fn ensure_notices(
     CREATING_PANEL.set("");
     let notices = result.map_err(|e| eprintln!("shinpi: notices: {e}")).ok()?;
     bind_panel_events(notices.window(), popup, state, sender, true);
+    notices.set_notes(ModelRc::new(VecModel::<NoticeRow>::default()));
     let tx = sender.clone();
-    notices.on_dismiss_note(move |index| {
-        let _ = tx.send(Command::DismissNotice(index as usize));
+    notices.on_dismiss_note(move |id| {
+        let _ = tx.send(Command::DismissNotice(id));
     });
     shell.notices = Some(notices.clone_strong());
     Some(notices)
@@ -336,7 +337,10 @@ fn sync_notices(
     };
     if !show {
         if let Some(notices) = &shell.notices {
-            if notices.get_expanded() {
+            if state.borrow().config.history.is_empty() {
+                notices.set_expanded(false);
+                let _ = notices.hide();
+            } else if notices.get_expanded() {
                 notices.set_expanded(false);
                 let weak = notices.as_weak();
                 slint::Timer::single_shot(Duration::from_millis(180), move || {
@@ -404,6 +408,48 @@ fn sync_notices(
                 }
             }
         }
+    }
+}
+
+fn fill_notices(notices: &Notices, state: &State) {
+    let model = notices.get_notes();
+    let Some(rows) = model.as_any().downcast_ref::<VecModel<NoticeRow>>() else {
+        return;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let history = &state.config.history;
+    let first = history
+        .len()
+        .saturating_sub(state.config.history_count as usize);
+    for (index, note) in history[first..].iter().enumerate() {
+        let row = NoticeRow {
+            id: note.id,
+            message: note.message.clone().into(),
+            when: notices::ago(note.at, now, &state.catalog).into(),
+            closing: note.closing(),
+            test: note.test,
+        };
+        // Keep the delegates and active pointer presses of surviving rows.
+        if let Some(previous) = (index..rows.row_count()).find(|&i| {
+            rows.row_data(i)
+                .is_some_and(|existing| existing.id == row.id)
+        }) {
+            for _ in index..previous {
+                rows.remove(index);
+            }
+            if rows.row_data(index).as_ref() != Some(&row) {
+                rows.set_row_data(index, row);
+            }
+        } else {
+            rows.insert(index, row);
+        }
+    }
+    let count = history.len() - first;
+    while rows.row_count() > count {
+        rows.remove(count);
     }
 }
 
@@ -840,31 +886,7 @@ fn fill(shell: &Shell, state: &State) {
         popup.set_busy(state.busy);
     }
     if let Some(notices) = &shell.notices {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let first = state
-            .config
-            .history
-            .len()
-            .saturating_sub(state.config.history_count as usize);
-        let notes: Vec<_> = state
-            .config
-            .history
-            .iter()
-            .enumerate()
-            .skip(first)
-            .map(|(index, note)| NoticeRow {
-                index: index as i32,
-                message: note.message.clone().into(),
-                when: notices::ago(note.at, now, &state.catalog).into(),
-                fade: note.fade,
-            })
-            .collect();
-        if !notices.get_notes().iter().eq(notes.iter().cloned()) {
-            notices.set_notes(ModelRc::new(VecModel::from(notes)));
-        }
+        fill_notices(notices, state);
     }
     let Some(settings) = &shell.settings else {
         return;
@@ -1292,11 +1314,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state.config.history_hidden = !state.config.history_hidden;
                         changed = true;
                     }
-                    Command::DismissNotice(index) => {
-                        if let Some(note) = data.borrow_mut().config.history.get_mut(index) {
-                            note.closing = true;
-                            redraw = true;
-                        }
+                    Command::DismissNotice(id) => {
+                        redraw |= notices::dismiss(
+                            &mut data.borrow_mut().config.history,
+                            id,
+                            Instant::now(),
+                        );
                     }
                     Command::TestNotification => {
                         let mut state = data.borrow_mut();
@@ -1307,6 +1330,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let message = state
                                 .catalog
                                 .tr("This test bypasses battery levels and notification rules.");
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            notices::push(&mut state.config.history, message.clone(), now, true);
+                            changed = true;
                             let tx = update_tx.clone();
                             rt_handle.spawn(async move {
                                 let result = notify::send(&title, &message)
@@ -1456,11 +1485,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 {
                                     device.last_notified = at;
                                 }
-                                let animate = windows
-                                    .notices
-                                    .as_ref()
-                                    .is_some_and(|n| n.window().is_visible());
-                                notices::push(&mut state.config.history, message, at, animate);
+                                notices::push(&mut state.config.history, message, at, false);
                                 changed = true;
                                 state.notification_error.clear();
                             }
@@ -1472,12 +1497,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            {
-                let mut state = data.borrow_mut();
-                let count = state.config.history.len();
-                redraw |= notices::step(&mut state.config.history);
-                changed |= count != state.config.history.len();
-            }
+            changed |=
+                notices::remove_dismissed(&mut data.borrow_mut().config.history, Instant::now());
             if changed {
                 let error = config::save(&data.borrow().config)
                     .err()

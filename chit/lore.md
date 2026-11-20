@@ -9,6 +9,7 @@
 - Battery polling and low-charge notifications continue while all application windows are closed.
 - Reclaim hidden UI components without losing the selected settings tab or popup pin state; periodic UI refreshes must only visit visible windows.
 - Reuse decoded SVG images through a bounded cache so repeated refreshes do not retain an unbounded set of images.
+- Write Dev test notifications to the panel history even if the system notification service rejects them, so panel testing does not depend on system delivery.
 - Treat the instance counter of a directly attached USB HID device as transient and keep selections separate by source, USB port and interface when a hardware address or serial is unavailable.
 
 ## External Compatibility Constraints
