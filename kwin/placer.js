@@ -201,17 +201,16 @@ function track(window) {
     const entry = { window: window, anchor: null, moving: false };
     windows.set(window, entry);
     const onShow = () => {
+        if (window.hidden || window.deleted || window.minimized) { return; }
         hideFromTaskbar(window);
         entry.anchor = selectAnchor(window);
         place(entry);
+        // A tray click doesn't give the Wayland client an activation token.
+        if (workspace.activeWindow !== window) { workspace.activeWindow = window; }
     };
     const visibilityChanged = window.windowShown || window.hiddenChanged;
     if (visibilityChanged) {
-        visibilityChanged.connect(() => {
-            if (!window.hidden) {
-                onShow();
-            }
-        });
+        visibilityChanged.connect(onShow);
     }
     window.frameGeometryChanged.connect(() => place(entry));
     window.closed.connect(() => windows.delete(window));

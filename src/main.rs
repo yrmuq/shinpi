@@ -32,11 +32,7 @@ struct State {
     config: config::Config,
     catalog: i18n::Catalog,
     scan: device::Scan,
-    opened: Instant,
-    blur: Option<Instant>,
-    seen_focus: bool,
-    popup_focused: bool,
-    notices_focused: bool,
+    panel_focus: PanelFocus,
     closing: bool,
     busy: bool,
     editing: Option<String>,
@@ -46,6 +42,37 @@ struct State {
     testing_notification: bool,
     update: updates::Status,
     logo_taps: about::LogoTaps,
+}
+
+#[derive(Default)]
+struct PanelFocus {
+    popup: bool,
+    notices: bool,
+    lost: Option<Instant>,
+}
+
+impl PanelFocus {
+    fn update(&mut self, notices: bool, focused: bool, now: Instant) {
+        let had_focus = self.popup || self.notices;
+        if notices {
+            self.notices = focused;
+        } else {
+            self.popup = focused;
+        }
+        if self.popup || self.notices {
+            self.lost = None;
+        } else if had_focus {
+            self.lost = Some(now);
+        }
+    }
+
+    fn should_dismiss(&self, pinned: bool, now: Instant) -> bool {
+        // A focus transfer between the two windows can briefly blur both.
+        !pinned
+            && self
+                .lost
+                .is_some_and(|lost| now.duration_since(lost) >= Duration::from_millis(150))
+    }
 }
 
 enum Event {
@@ -260,18 +287,9 @@ fn bind_panel_events(
     window.on_winit_window_event(move |_, event| {
         match event {
             winit::event::WindowEvent::Focused(focused) => {
-                let mut state = data.borrow_mut();
-                if notices {
-                    state.notices_focused = *focused;
-                } else {
-                    state.popup_focused = *focused;
-                }
-                if *focused {
-                    state.seen_focus = true;
-                    state.blur = None;
-                } else if state.seen_focus {
-                    state.blur = Some(Instant::now());
-                }
+                data.borrow_mut()
+                    .panel_focus
+                    .update(notices, *focused, Instant::now());
             }
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state == winit::event::ElementState::Pressed
@@ -340,13 +358,24 @@ fn sync_notices(
             if state.borrow().config.history.is_empty() {
                 notices.set_expanded(false);
                 let _ = notices.hide();
+                state
+                    .borrow_mut()
+                    .panel_focus
+                    .update(true, false, Instant::now());
             } else if notices.get_expanded() {
                 notices.set_expanded(false);
                 let weak = notices.as_weak();
+                let state = Rc::downgrade(state);
                 slint::Timer::single_shot(Duration::from_millis(180), move || {
                     if let Some(notices) = weak.upgrade() {
                         if !notices.get_expanded() {
                             let _ = notices.hide();
+                            if let Some(state) = state.upgrade() {
+                                state
+                                    .borrow_mut()
+                                    .panel_focus
+                                    .update(true, false, Instant::now());
+                            }
                         }
                     }
                 });
@@ -369,9 +398,6 @@ fn sync_notices(
         notices.set_expanded(false);
         let _ = notices.get_slide();
         let _ = notices.show();
-        if let Some(popup) = &shell.popup {
-            let _ = popup.window().with_winit_window(|w| w.focus_window());
-        }
     }
     if !notices.get_expanded() {
         notices.set_expanded(true);
@@ -965,23 +991,29 @@ fn fill(shell: &Shell, state: &State) {
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
     timer.stop();
     if open {
+        state.borrow_mut().panel_focus = PanelFocus::default();
         popup.set_slide(popup.get_layout_height());
         if let Err(e) = popup.show() {
             eprintln!("shinpi: {e}");
             return;
         }
-        let _ = popup.window().with_winit_window(|w| {
-            w.set_title("shinpi-devices");
-            w.focus_window();
-        });
-        let mut state = state.borrow_mut();
-        state.opened = Instant::now();
-        state.blur = None;
-        state.seen_focus = false;
-        state.closing = false;
+        state.borrow_mut().closing = false;
+        if popup
+            .window()
+            .with_winit_window(|w| {
+                w.set_title("shinpi-devices");
+                w.focus_window();
+                w.has_focus()
+            })
+            .unwrap_or_default()
+        {
+            state
+                .borrow_mut()
+                .panel_focus
+                .update(false, true, Instant::now());
+        }
     } else {
         state.borrow_mut().closing = true;
-        state.borrow_mut().blur = None;
     }
     let weak = popup.as_weak();
     let state = state.clone();
@@ -1056,11 +1088,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         config: config::load(),
         catalog,
         scan: device::Scan::default(),
-        opened: Instant::now(),
-        blur: None,
-        seen_focus: false,
-        popup_focused: false,
-        notices_focused: false,
+        panel_focus: PanelFocus::default(),
         closing: false,
         busy: true,
         editing: None,
@@ -1562,14 +1590,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let should_close = {
                     let state = data.borrow();
                     popup.window().is_visible()
-                        && !state.popup_focused
-                        && !state.notices_focused
-                        && !popup.get_pinned()
                         && !state.closing
-                        && state.opened.elapsed() >= Duration::from_millis(350)
                         && state
-                            .blur
-                            .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
+                            .panel_focus
+                            .should_dismiss(popup.get_pinned(), Instant::now())
                 };
                 if should_close {
                     animate(popup, &data, &slide, false);
@@ -1595,6 +1619,28 @@ fn main() {
 #[cfg(test)]
 mod window_tests {
     use super::*;
+    #[test]
+    fn focus_transfer_within_the_panel_stays_open_and_outside_focus_respects_pin() {
+        let mut focus = PanelFocus::default();
+        let now = Instant::now();
+        let settled = now + Duration::from_millis(160);
+        focus.update(false, false, now);
+        assert!(!focus.should_dismiss(false, settled));
+
+        focus.update(false, true, now);
+        focus.update(false, false, now);
+        assert!(!focus.should_dismiss(false, now));
+        focus.update(true, true, now);
+        assert!(!focus.should_dismiss(false, settled));
+        focus.update(false, true, now);
+        focus.update(true, false, now);
+        assert!(!focus.should_dismiss(false, settled));
+
+        focus.update(false, false, now);
+        assert!(focus.should_dismiss(false, settled));
+        assert!(!focus.should_dismiss(true, settled));
+    }
+
     #[test]
     fn native_identity_is_set_before_mapping_and_windows_cannot_resize() {
         let popup = window_attributes(winit::window::WindowAttributes::default(), "shinpi-devices");

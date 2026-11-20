@@ -215,13 +215,16 @@ test('native panel classes place recreated surfaces before captions and acknowle
             frameGeometryChanged: signal(), windowShown: signal(), closed: signal() };
         live.push(popup); added.emit(popup);
         assert.equal(popup.skipTaskbar, true, 'hide without waiting for the caption');
+        assert.equal(ctx.workspace.activeWindow, popup, 'activate the panel on a tray click');
         assert.equal(popup.noBorder, true);
         assert.equal(popup.skipsCloseAnimation, true);
         assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
         popup.hidden = true;
         popup.frameGeometry = { ...popup.frameGeometry, x: 420, y: 300 };
+        ctx.workspace.activeWindow = settings;
         popup.hidden = false; popup.windowShown.emit();
         assert.deepEqual([popup.frameGeometry.x, popup.frameGeometry.y], [832, 612]);
+        assert.equal(ctx.workspace.activeWindow, popup, 'activate again on reopening');
         const notice = { resourceClass: '', resourceName: 'shinpi-popup-notices', caption: '', output,
             hidden: false, frameGeometry: { x: 420, y: 300, width: 360, height: 80 },
             frameGeometryChanged: signal(), windowShown: signal(), closed: signal() };
@@ -229,6 +232,10 @@ test('native panel classes place recreated surfaces before captions and acknowle
         assert.equal(notice.skipTaskbar, true);
         assert.equal(notice.frameGeometry.y, popup.frameGeometry.y - 80);
         assert.equal(notice.frameGeometry.x, popup.frameGeometry.x);
+        ctx.workspace.activeWindow = settings;
+        notice.frameGeometryChanged.emit();
+        popup.frameGeometryChanged.emit();
+        assert.equal(ctx.workspace.activeWindow, settings, 'repositioning does not take back focus');
         notice.closed.emit(); popup.closed.emit(); live.splice(2);
     }
     assert.equal(settings.skipTaskbar, false, 'only settings remain on the taskbar');
