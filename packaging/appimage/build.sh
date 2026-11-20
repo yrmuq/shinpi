@@ -16,8 +16,8 @@ case "$ARCH" in
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 TOOL="$CACHE/appimagetool-x86_64.AppImage"
-TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
-TOOL_SHA="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+TOOL_SHA="e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03"
 if [ ! -s "$TOOL" ] || ! echo "$TOOL_SHA  $TOOL" | sha256sum -c - >/dev/null 2>&1; then
     curl -fL --retry 3 -o "$TOOL.part" "$TOOL_URL"
     echo "$TOOL_SHA  $TOOL.part" | sha256sum -c -
