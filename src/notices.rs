@@ -1,47 +1,64 @@
 use serde::{Deserialize, Serialize};
+use std::{
+    sync::atomic::{AtomicI32, Ordering},
+    time::{Duration, Instant},
+};
 
 pub const LIMIT: usize = 20;
+const DISMISS_DELAY: Duration = Duration::from_millis(160);
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Note {
+    #[serde(skip, default = "next_id")]
+    pub id: i32,
     pub message: String,
     pub at: u64,
-    #[serde(skip, default = "visible")]
-    pub fade: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
     #[serde(skip)]
-    pub closing: bool,
+    dismissed_at: Option<Instant>,
 }
 
-fn visible() -> f32 {
-    1.0
+impl Note {
+    pub fn closing(&self) -> bool {
+        self.dismissed_at.is_some()
+    }
 }
 
-pub fn push(notes: &mut Vec<Note>, message: String, at: u64, animate: bool) {
+fn next_id() -> i32 {
+    static NEXT: AtomicI32 = AtomicI32::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+pub fn push(notes: &mut Vec<Note>, message: String, at: u64, test: bool) {
     notes.push(Note {
+        id: next_id(),
         message,
         at,
-        fade: if animate { 0.0 } else { 1.0 },
-        closing: false,
+        test,
+        dismissed_at: None,
     });
     notes.drain(..notes.len().saturating_sub(LIMIT));
 }
 
-pub fn step(notes: &mut Vec<Note>) -> bool {
-    let mut changed = false;
-    for note in notes.iter_mut() {
-        let target = if note.closing { 0.0 } else { 1.0 };
-        if note.fade != target {
-            note.fade = if note.closing {
-                (note.fade - 1.0 / 3.0).max(0.0)
-            } else {
-                (note.fade + 1.0 / 3.0).min(1.0)
-            };
-            changed = true;
-        }
-    }
+pub fn dismiss(notes: &mut [Note], id: i32, now: Instant) -> bool {
+    let Some(note) = notes
+        .iter_mut()
+        .find(|note| note.id == id && !note.closing())
+    else {
+        return false;
+    };
+    note.dismissed_at = Some(now);
+    true
+}
+
+pub fn remove_dismissed(notes: &mut Vec<Note>, now: Instant) -> bool {
     let count = notes.len();
-    notes.retain(|note| !note.closing || note.fade > 0.0);
-    changed || count != notes.len()
+    notes.retain(|note| {
+        note.dismissed_at
+            .is_none_or(|at| now.duration_since(at) < DISMISS_DELAY)
+    });
+    count != notes.len()
 }
 
 pub fn ago(at: u64, now: u64, catalog: &crate::i18n::Catalog) -> String {
@@ -96,20 +113,27 @@ mod tests {
     fn history_keeps_latest_records_restores_and_dismisses_only_chosen_note() {
         let mut notes = Vec::new();
         for at in 1..=22 {
-            push(&mut notes, at.to_string(), at, true);
+            push(&mut notes, at.to_string(), at, at == 5);
         }
         assert_eq!(notes.len(), LIMIT);
         assert_eq!(notes[0].at, 3);
         let raw = serde_json::to_string(&notes).unwrap();
         let mut restored: Vec<Note> = serde_json::from_str(&raw).unwrap();
-        assert_eq!(restored[0].fade, 1.0);
-        restored[1].closing = true;
-        for _ in 0..4 {
-            step(&mut restored);
-        }
+        assert!(!restored[0].closing());
+        assert!(!restored[0].test);
+        let id = restored[1].id;
+        let even_after_shift = restored[2].id;
+        let now = Instant::now();
+        assert!(dismiss(&mut restored, id, now));
+        assert!(!dismiss(&mut restored, id, now));
+        assert!(!remove_dismissed(&mut restored, now));
+        assert!(remove_dismissed(&mut restored, now + DISMISS_DELAY));
         assert_eq!(restored.len(), LIMIT - 1);
         assert_eq!(restored[0].at, 3);
         assert_eq!(restored[1].at, 5);
+        assert!(restored[1].test);
+        assert!(dismiss(&mut restored, even_after_shift, now));
+        assert_eq!(restored.iter().find(|note| note.closing()).unwrap().at, 5);
         assert_eq!(
             ago(100, 99, &crate::i18n::Catalog::load("Russian")),
             "Только что"

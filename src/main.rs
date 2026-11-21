@@ -32,11 +32,7 @@ struct State {
     config: config::Config,
     catalog: i18n::Catalog,
     scan: device::Scan,
-    opened: Instant,
-    blur: Option<Instant>,
-    seen_focus: bool,
-    popup_focused: bool,
-    notices_focused: bool,
+    panel_focus: PanelFocus,
     closing: bool,
     busy: bool,
     editing: Option<String>,
@@ -46,6 +42,37 @@ struct State {
     testing_notification: bool,
     update: updates::Status,
     logo_taps: about::LogoTaps,
+}
+
+#[derive(Default)]
+struct PanelFocus {
+    popup: bool,
+    notices: bool,
+    lost: Option<Instant>,
+}
+
+impl PanelFocus {
+    fn update(&mut self, notices: bool, focused: bool, now: Instant) {
+        let had_focus = self.popup || self.notices;
+        if notices {
+            self.notices = focused;
+        } else {
+            self.popup = focused;
+        }
+        if self.popup || self.notices {
+            self.lost = None;
+        } else if had_focus {
+            self.lost = Some(now);
+        }
+    }
+
+    fn should_dismiss(&self, pinned: bool, now: Instant) -> bool {
+        // A focus transfer between the two windows can briefly blur both.
+        !pinned
+            && self
+                .lost
+                .is_some_and(|lost| now.duration_since(lost) >= Duration::from_millis(150))
+    }
 }
 
 enum Event {
@@ -101,6 +128,62 @@ struct Shell {
     popup: Option<Popup>,
     settings: Option<Settings>,
     notices: Option<Notices>,
+    settings_tab: i32,
+    popup_pinned: bool,
+}
+
+impl Shell {
+    fn is_empty(&self) -> bool {
+        self.popup.is_none() && self.settings.is_none() && self.notices.is_none()
+    }
+
+    fn visible(&self) -> Self {
+        Self {
+            popup: self
+                .popup
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            settings: self
+                .settings
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            notices: self
+                .notices
+                .as_ref()
+                .filter(|window| window.window().is_visible())
+                .map(|window| window.clone_strong()),
+            ..Self::default()
+        }
+    }
+
+    fn release_hidden(&mut self) {
+        if let Some(settings) = &self.settings {
+            if !settings.window().is_visible() {
+                self.settings_tab = settings.get_tab_index();
+                self.settings = None;
+            }
+        }
+        if self
+            .notices
+            .as_ref()
+            .is_some_and(|window| !window.window().is_visible())
+        {
+            self.notices = None;
+        }
+        // Keep the notice close animation alive before releasing its parent panel.
+        if self.notices.is_none()
+            && self
+                .popup
+                .as_ref()
+                .is_some_and(|window| !window.window().is_visible())
+        {
+            if let Some(popup) = self.popup.take() {
+                self.popup_pinned = popup.get_pinned();
+            }
+        }
+    }
 }
 
 thread_local! {
@@ -149,7 +232,7 @@ fn ensure_popup(
         }
         popup.get_pinned()
     } else {
-        false
+        shell.popup_pinned
     };
     // Slint 1.18 discards native attributes on Wayland hide; recreate the panel adapter.
     shell.notices = None;
@@ -204,18 +287,9 @@ fn bind_panel_events(
     window.on_winit_window_event(move |_, event| {
         match event {
             winit::event::WindowEvent::Focused(focused) => {
-                let mut state = data.borrow_mut();
-                if notices {
-                    state.notices_focused = *focused;
-                } else {
-                    state.popup_focused = *focused;
-                }
-                if *focused {
-                    state.seen_focus = true;
-                    state.blur = None;
-                } else if state.seen_focus {
-                    state.blur = Some(Instant::now());
-                }
+                data.borrow_mut()
+                    .panel_focus
+                    .update(notices, *focused, Instant::now());
             }
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state == winit::event::ElementState::Pressed
@@ -254,9 +328,10 @@ fn ensure_notices(
     CREATING_PANEL.set("");
     let notices = result.map_err(|e| eprintln!("shinpi: notices: {e}")).ok()?;
     bind_panel_events(notices.window(), popup, state, sender, true);
+    notices.set_notes(ModelRc::new(VecModel::<NoticeRow>::default()));
     let tx = sender.clone();
-    notices.on_dismiss_note(move |index| {
-        let _ = tx.send(Command::DismissNotice(index as usize));
+    notices.on_dismiss_note(move |id| {
+        let _ = tx.send(Command::DismissNotice(id));
     });
     shell.notices = Some(notices.clone_strong());
     Some(notices)
@@ -280,13 +355,27 @@ fn sync_notices(
     };
     if !show {
         if let Some(notices) = &shell.notices {
-            if notices.get_expanded() {
+            if state.borrow().config.history.is_empty() {
+                notices.set_expanded(false);
+                let _ = notices.hide();
+                state
+                    .borrow_mut()
+                    .panel_focus
+                    .update(true, false, Instant::now());
+            } else if notices.get_expanded() {
                 notices.set_expanded(false);
                 let weak = notices.as_weak();
+                let state = Rc::downgrade(state);
                 slint::Timer::single_shot(Duration::from_millis(180), move || {
                     if let Some(notices) = weak.upgrade() {
                         if !notices.get_expanded() {
                             let _ = notices.hide();
+                            if let Some(state) = state.upgrade() {
+                                state
+                                    .borrow_mut()
+                                    .panel_focus
+                                    .update(true, false, Instant::now());
+                            }
                         }
                     }
                 });
@@ -309,9 +398,6 @@ fn sync_notices(
         notices.set_expanded(false);
         let _ = notices.get_slide();
         let _ = notices.show();
-        if let Some(popup) = &shell.popup {
-            let _ = popup.window().with_winit_window(|w| w.focus_window());
-        }
     }
     if !notices.get_expanded() {
         notices.set_expanded(true);
@@ -351,6 +437,48 @@ fn sync_notices(
     }
 }
 
+fn fill_notices(notices: &Notices, state: &State) {
+    let model = notices.get_notes();
+    let Some(rows) = model.as_any().downcast_ref::<VecModel<NoticeRow>>() else {
+        return;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let history = &state.config.history;
+    let first = history
+        .len()
+        .saturating_sub(state.config.history_count as usize);
+    for (index, note) in history[first..].iter().enumerate() {
+        let row = NoticeRow {
+            id: note.id,
+            message: note.message.clone().into(),
+            when: notices::ago(note.at, now, &state.catalog).into(),
+            closing: note.closing(),
+            test: note.test,
+        };
+        // Keep the delegates and active pointer presses of surviving rows.
+        if let Some(previous) = (index..rows.row_count()).find(|&i| {
+            rows.row_data(i)
+                .is_some_and(|existing| existing.id == row.id)
+        }) {
+            for _ in index..previous {
+                rows.remove(index);
+            }
+            if rows.row_data(index).as_ref() != Some(&row) {
+                rows.set_row_data(index, row);
+            }
+        } else {
+            rows.insert(index, row);
+        }
+    }
+    let count = history.len() - first;
+    while rows.row_count() > count {
+        rows.remove(count);
+    }
+}
+
 fn ensure_settings(
     shell: &mut Shell,
     sender: &tokio::sync::mpsc::UnboundedSender<Command>,
@@ -361,7 +489,7 @@ fn ensure_settings(
         }
         settings.get_tab_index()
     } else {
-        0
+        shell.settings_tab
     };
     shell.settings = None;
     let settings = Settings::new()
@@ -544,16 +672,22 @@ fn resize_settings(shell: &Shell, config: &config::Config) {
 }
 
 fn paint(shell: &Shell, state: &State) {
+    if shell.is_empty() {
+        return;
+    }
     let cfg = &state.config;
     let catalog = &state.catalog;
-    let labels = ModelRc::new(VecModel::from(catalog.labels()));
+    let labels = catalog.labels();
     let palette = theme::system_palette(&cfg.theme);
     let dark = theme::resolved(&cfg.theme, theme::system_dark()) == "dark";
     let font = theme::system_font();
     macro_rules! window_style {
         ($window:expr) => {{
             let window = $window;
-            window.global::<Translations>().set_strings(labels.clone());
+            let translations = window.global::<Translations>();
+            if !translations.get_strings().iter().eq(labels.iter().cloned()) {
+                translations.set_strings(ModelRc::new(VecModel::from(labels.clone())));
+            }
             window.set_dark(dark);
             window.set_ui_font_family(font.family.clone().into());
             // Slint applies DPI scaling; rounding before mapping changed the font on the next repaint.
@@ -683,7 +817,13 @@ fn paint(shell: &Shell, state: &State) {
                 .iter()
                 .map(|name| slint::SharedString::from(i18n::language_label(name))),
         );
-        settings.set_language_names(ModelRc::new(VecModel::from(names)));
+        if !settings
+            .get_language_names()
+            .iter()
+            .eq(names.iter().cloned())
+        {
+            settings.set_language_names(ModelRc::new(VecModel::from(names)));
+        }
         settings.set_language_index(if cfg.language.is_empty() {
             0
         } else {
@@ -704,8 +844,7 @@ fn paint(shell: &Shell, state: &State) {
         settings.set_threshold(i32::from(cfg.low_threshold));
         settings.set_repeat_minutes(cfg.repeat_minutes as i32);
         let svg = icons::tray_svg(cfg.minimum(), cfg.tray_orientation, cfg.colored_icon, dark);
-        settings
-            .set_tray_preview(slint::Image::load_from_svg_data(svg.as_bytes()).unwrap_or_default());
+        settings.set_tray_preview(icons::svg_image(svg.as_bytes()).unwrap_or_default());
     }
 }
 
@@ -728,10 +867,7 @@ fn row(
                 device::Kind::Gamepad => include_bytes!("../ui/icons/input-gaming.svg"),
                 device::Kind::Other => include_bytes!("../ui/icons/battery.svg"),
             };
-            (
-                slint::Image::load_from_svg_data(data).unwrap_or_default(),
-                true,
-            )
+            (icons::svg_image(data).unwrap_or_default(), true)
         }
     };
     DeviceRow {
@@ -760,7 +896,7 @@ fn row(
 }
 
 fn fill(shell: &Shell, state: &State) {
-    if shell.popup.is_none() && shell.settings.is_none() {
+    if shell.is_empty() {
         return;
     }
     let rows: Vec<_> = state
@@ -770,39 +906,20 @@ fn fill(shell: &Shell, state: &State) {
         .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true, &state.catalog))
         .collect();
     if let Some(popup) = &shell.popup {
-        popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+        if !popup.get_rows().iter().eq(rows.iter().cloned()) {
+            popup.set_rows(ModelRc::new(VecModel::from(rows.clone())));
+        }
         popup.set_busy(state.busy);
     }
     if let Some(notices) = &shell.notices {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let first = state
-            .config
-            .history
-            .len()
-            .saturating_sub(state.config.history_count as usize);
-        notices.set_notes(ModelRc::new(VecModel::from(
-            state
-                .config
-                .history
-                .iter()
-                .enumerate()
-                .skip(first)
-                .map(|(index, note)| NoticeRow {
-                    index: index as i32,
-                    message: note.message.clone().into(),
-                    when: notices::ago(note.at, now, &state.catalog).into(),
-                    fade: note.fade,
-                })
-                .collect::<Vec<_>>(),
-        )));
+        fill_notices(notices, state);
     }
     let Some(settings) = &shell.settings else {
         return;
     };
-    settings.set_rows(ModelRc::new(VecModel::from(rows)));
+    if !settings.get_rows().iter().eq(rows.iter().cloned()) {
+        settings.set_rows(ModelRc::new(VecModel::from(rows)));
+    }
     let candidates: Vec<_> = state
         .scan
         .devices
@@ -813,12 +930,23 @@ fn fill(shell: &Shell, state: &State) {
                 d.kind,
                 &d.reading,
                 &d.source,
-                state.config.devices.iter().any(|s| s.id == d.id),
+                state.config.devices.iter().any(|s| {
+                    state
+                        .scan
+                        .find(&s.id)
+                        .is_some_and(|row| std::ptr::eq(row, d))
+                }),
                 &state.catalog,
             )
         })
         .collect();
-    settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
+    if !settings
+        .get_found_rows()
+        .iter()
+        .eq(candidates.iter().cloned())
+    {
+        settings.set_found_rows(ModelRc::new(VecModel::from(candidates)));
+    }
     settings.set_busy(state.busy);
     let mut diagnostics: Vec<_> = state
         .scan
@@ -847,34 +975,45 @@ fn fill(shell: &Shell, state: &State) {
     if diagnostics.is_empty() {
         diagnostics.push(state.catalog.tr("All sources have been scanned."));
     }
-    settings.set_diagnostics(ModelRc::new(VecModel::from(
-        diagnostics
-            .into_iter()
-            .map(slint::SharedString::from)
-            .collect::<Vec<_>>(),
-    )));
+    let diagnostics: Vec<_> = diagnostics
+        .into_iter()
+        .map(slint::SharedString::from)
+        .collect();
+    if !settings
+        .get_diagnostics()
+        .iter()
+        .eq(diagnostics.iter().cloned())
+    {
+        settings.set_diagnostics(ModelRc::new(VecModel::from(diagnostics)));
+    }
 }
 
 fn animate(popup: &Popup, state: &Rc<RefCell<State>>, timer: &Rc<slint::Timer>, open: bool) {
     timer.stop();
     if open {
+        state.borrow_mut().panel_focus = PanelFocus::default();
         popup.set_slide(popup.get_layout_height());
         if let Err(e) = popup.show() {
             eprintln!("shinpi: {e}");
             return;
         }
-        let _ = popup.window().with_winit_window(|w| {
-            w.set_title("shinpi-devices");
-            w.focus_window();
-        });
-        let mut state = state.borrow_mut();
-        state.opened = Instant::now();
-        state.blur = None;
-        state.seen_focus = false;
-        state.closing = false;
+        state.borrow_mut().closing = false;
+        if popup
+            .window()
+            .with_winit_window(|w| {
+                w.set_title("shinpi-devices");
+                w.focus_window();
+                w.has_focus()
+            })
+            .unwrap_or_default()
+        {
+            state
+                .borrow_mut()
+                .panel_focus
+                .update(false, true, Instant::now());
+        }
     } else {
         state.borrow_mut().closing = true;
-        state.borrow_mut().blur = None;
     }
     let weak = popup.as_weak();
     let state = state.clone();
@@ -949,11 +1088,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         config: config::load(),
         catalog,
         scan: device::Scan::default(),
-        opened: Instant::now(),
-        blur: None,
-        seen_focus: false,
-        popup_focused: false,
-        notices_focused: false,
+        panel_focus: PanelFocus::default(),
         closing: false,
         busy: true,
         editing: None,
@@ -1038,6 +1173,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_millis(60),
         move || {
             let mut windows = tick_shell.borrow_mut();
+            windows.release_hidden();
             let mut changed = false;
             let mut redraw = false;
             while let Ok(command) = commands.try_recv() {
@@ -1206,11 +1342,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state.config.history_hidden = !state.config.history_hidden;
                         changed = true;
                     }
-                    Command::DismissNotice(index) => {
-                        if let Some(note) = data.borrow_mut().config.history.get_mut(index) {
-                            note.closing = true;
-                            redraw = true;
-                        }
+                    Command::DismissNotice(id) => {
+                        redraw |= notices::dismiss(
+                            &mut data.borrow_mut().config.history,
+                            id,
+                            Instant::now(),
+                        );
                     }
                     Command::TestNotification => {
                         let mut state = data.borrow_mut();
@@ -1221,6 +1358,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let message = state
                                 .catalog
                                 .tr("This test bypasses battery levels and notification rules.");
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            notices::push(&mut state.config.history, message.clone(), now, true);
+                            changed = true;
                             let tx = update_tx.clone();
                             rt_handle.spawn(async move {
                                 let result = notify::send(&title, &message)
@@ -1370,11 +1513,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 {
                                     device.last_notified = at;
                                 }
-                                let animate = windows
-                                    .notices
-                                    .as_ref()
-                                    .is_some_and(|n| n.window().is_visible());
-                                notices::push(&mut state.config.history, message, at, animate);
+                                notices::push(&mut state.config.history, message, at, false);
                                 changed = true;
                                 state.notification_error.clear();
                             }
@@ -1386,12 +1525,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            {
-                let mut state = data.borrow_mut();
-                let count = state.config.history.len();
-                redraw |= notices::step(&mut state.config.history);
-                changed |= count != state.config.history.len();
-            }
+            changed |=
+                notices::remove_dismissed(&mut data.borrow_mut().config.history, Instant::now());
             if changed {
                 let error = config::save(&data.borrow().config)
                     .err()
@@ -1408,13 +1543,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     settings.set_error(error.into());
                 }
             }
-            if changed || redraw || last_theme.get().elapsed() >= Duration::from_secs(2) {
+            let periodic = last_theme.get().elapsed() >= Duration::from_secs(2);
+            let refresh_ui = changed || redraw || periodic;
+            if refresh_ui {
                 last_theme.set(Instant::now());
                 let state = data.borrow();
-                paint(&windows, &state);
-                fill(&windows, &state);
+                let visible = windows.visible();
+                paint(&visible, &state);
+                fill(&visible, &state);
             }
-            {
+            if refresh_ui {
                 let state = data.borrow();
                 let cfg = &state.config;
                 let signature = (
@@ -1452,14 +1590,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let should_close = {
                     let state = data.borrow();
                     popup.window().is_visible()
-                        && !state.popup_focused
-                        && !state.notices_focused
-                        && !popup.get_pinned()
                         && !state.closing
-                        && state.opened.elapsed() >= Duration::from_millis(350)
                         && state
-                            .blur
-                            .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
+                            .panel_focus
+                            .should_dismiss(popup.get_pinned(), Instant::now())
                 };
                 if should_close {
                     animate(popup, &data, &slide, false);
@@ -1485,6 +1619,28 @@ fn main() {
 #[cfg(test)]
 mod window_tests {
     use super::*;
+    #[test]
+    fn focus_transfer_within_the_panel_stays_open_and_outside_focus_respects_pin() {
+        let mut focus = PanelFocus::default();
+        let now = Instant::now();
+        let settled = now + Duration::from_millis(160);
+        focus.update(false, false, now);
+        assert!(!focus.should_dismiss(false, settled));
+
+        focus.update(false, true, now);
+        focus.update(false, false, now);
+        assert!(!focus.should_dismiss(false, now));
+        focus.update(true, true, now);
+        assert!(!focus.should_dismiss(false, settled));
+        focus.update(false, true, now);
+        focus.update(true, false, now);
+        assert!(!focus.should_dismiss(false, settled));
+
+        focus.update(false, false, now);
+        assert!(focus.should_dismiss(false, settled));
+        assert!(!focus.should_dismiss(true, settled));
+    }
+
     #[test]
     fn native_identity_is_set_before_mapping_and_windows_cannot_resize() {
         let popup = window_attributes(winit::window::WindowAttributes::default(), "shinpi-devices");

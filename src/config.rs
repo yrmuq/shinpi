@@ -1,4 +1,4 @@
-use crate::device::{Band, Device, Kind, Reading, Scan};
+use crate::device::{same_id, Band, Device, Kind, Reading, Scan};
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
@@ -127,7 +127,7 @@ impl Config {
     }
 
     pub fn add(&mut self, device: &Device) {
-        if self.devices.iter().any(|d| d.id == device.id) {
+        if self.devices.iter().any(|d| device.matches_id(&d.id)) {
             return;
         }
         self.devices.push(Selected {
@@ -142,12 +142,28 @@ impl Config {
 
     pub fn observe(&mut self, scan: &Scan) -> bool {
         let mut changed = false;
+        let mut index = 0;
+        while index < self.devices.len() {
+            let selected = &self.devices[index];
+            let fresh = scan.find(&selected.id);
+            let duplicate = self.devices[..index].iter().position(|earlier| {
+                same_id(&earlier.id, &selected.id)
+                    || fresh.is_some_and(|row| {
+                        scan.find(&earlier.id)
+                            .is_some_and(|other| std::ptr::eq(row, other))
+                    })
+            });
+            if let Some(earlier) = duplicate {
+                let removed = self.devices.remove(index);
+                let kept = &mut self.devices[earlier];
+                kept.last_notified = kept.last_notified.max(removed.last_notified);
+                changed = true;
+            } else {
+                index += 1;
+            }
+        }
         for selected in &mut self.devices {
-            if let Some(fresh) = scan
-                .devices
-                .iter()
-                .find(|d| d.id == selected.id && d.has_reading())
-            {
+            if let Some(fresh) = scan.find(&selected.id).filter(|d| d.has_reading()) {
                 if selected.reading != fresh.reading {
                     selected.reading = fresh.reading.clone();
                     changed = true;
@@ -335,6 +351,40 @@ mod tests {
         assert_eq!(restored.devices[0].last_notified, 123);
         assert_eq!(restored.history[0].message, "Kept notice");
         assert_eq!(restored.history[0].at, 123);
+    }
+
+    #[test]
+    fn reconnect_updates_the_saved_row_and_merges_an_existing_duplicate() {
+        let port = "sys:/sys/devices/pci0000:00/usb1/1-2/1-2:1.0/0003:046D:C53F";
+        let source = "USB HID · HID++";
+        let mut old = Device::new(format!("{port}.000A"), "Mouse".into(), Kind::Mouse, source);
+        old.reading.percent = Some(20);
+        let mut current = old.clone();
+        current.id = format!("{source}:{port}.000B");
+        current.reading.percent = Some(100);
+        let mut config = Config::default();
+        config.add(&old);
+        config.devices[0].name = "My mouse".into();
+        config.devices[0].kind = Kind::Other;
+        config.devices[0].last_notified = 123;
+
+        config.add(&current);
+        assert_eq!(config.devices.len(), 1);
+        let mut legacy_duplicate = config.devices[0].clone();
+        legacy_duplicate.id = current.id.clone();
+        config.devices.push(legacy_duplicate);
+
+        let mut scan = Scan::default();
+        scan.insert(current);
+        assert!(config.observe(&scan));
+        assert_eq!(config.devices.len(), 1);
+        let selected = &config.devices[0];
+        assert_eq!(selected.id, old.id);
+        assert_eq!(selected.name, "My mouse");
+        assert_eq!(selected.kind, Kind::Other);
+        assert_eq!(selected.reading.percent, Some(100));
+        assert_eq!(selected.last_notified, 0);
+        assert!(!config.observe(&scan));
     }
 
     #[test]

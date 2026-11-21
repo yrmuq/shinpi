@@ -113,6 +113,10 @@ impl Reading {
 pub struct Device {
     #[serde(skip)]
     pub id: String,
+    #[serde(skip)]
+    pub native_id: Option<String>,
+    #[serde(skip)]
+    pub updated_at: u64,
     pub name: String,
     pub kind: Kind,
     pub reading: Reading,
@@ -124,6 +128,8 @@ impl Device {
     pub fn new(key: String, name: String, kind: Kind, source: &str) -> Self {
         Self {
             id: format!("{source}:{key}"),
+            native_id: None,
+            updated_at: 0,
             name,
             kind,
             reading: Reading::default(),
@@ -134,6 +140,71 @@ impl Device {
     pub fn has_reading(&self) -> bool {
         self.reading.percent.is_some() || self.reading.level.is_some() || self.reading.charging
     }
+
+    pub fn matches_id(&self, id: &str) -> bool {
+        same_id(&self.id, id)
+            || self
+                .native_id
+                .as_deref()
+                .is_some_and(|native| same_id(native, id))
+    }
+
+    fn reading_priority(&self) -> (bool, u64, u32) {
+        let path = self.native_id.as_deref().unwrap_or(&self.id);
+        let instance = usb_hid_key(path).map_or(0, |(_, instance)| instance);
+        (self.has_reading(), self.updated_at, instance)
+    }
+}
+
+pub fn same_id(left: &str, right: &str) -> bool {
+    left == right
+        || usb_hid_key(left)
+            .is_some_and(|(key, _)| usb_hid_key(right).is_some_and(|(other, _)| key == other))
+}
+
+fn usb_hid_key(id: &str) -> Option<(String, u32)> {
+    let (source, path) = id.split_once(":sys:/sys/devices/")?;
+    if path.starts_with("virtual/") {
+        return None;
+    }
+    let mut usb = false;
+    let mut instance = None;
+    let mut key = format!("{source}:sys:/sys/devices");
+    for segment in path.split('/') {
+        usb |= segment
+            .strip_prefix("usb")
+            .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()));
+        let stable = segment.split_once('.').and_then(|(name, suffix)| {
+            let model = name.strip_prefix("0003:")?;
+            let (vendor, product) = model.split_once(':')?;
+            let hex = |value: &str| value.bytes().all(|b| b.is_ascii_hexdigit());
+            if usb
+                && vendor.len() == 4
+                && product.len() == 4
+                && hex(vendor)
+                && hex(product)
+                && suffix.len() >= 4
+                && hex(suffix)
+            {
+                u32::from_str_radix(suffix, 16)
+                    .ok()
+                    .map(|value| (name, value))
+            } else {
+                None
+            }
+        });
+        key.push('/');
+        if let Some((name, value)) = stable {
+            // Child HID devices can share a receiver and model without being the same device.
+            if instance.replace(value).is_some() {
+                return None;
+            }
+            key.push_str(name);
+        } else {
+            key.push_str(segment);
+        }
+    }
+    Some((key, instance?))
 }
 
 #[derive(Default, Serialize)]
@@ -143,8 +214,35 @@ pub struct Scan {
 }
 
 impl Scan {
-    pub fn insert(&mut self, device: Device) {
-        self.devices.push(device);
+    pub fn insert(&mut self, mut device: Device) {
+        if let Some(existing) = self
+            .devices
+            .iter_mut()
+            .find(|row| row.matches_id(&device.id) || device.matches_id(&row.id))
+        {
+            if device.reading_priority() > existing.reading_priority() {
+                std::mem::swap(existing, &mut device);
+            }
+            // Keep the stronger ID and the path of the record supplying the reading.
+            if existing.native_id.is_none() {
+                if existing.id == device.id {
+                    existing.native_id = device.native_id;
+                } else if device.native_id.is_some() {
+                    existing.native_id = Some(std::mem::replace(&mut existing.id, device.id));
+                }
+            }
+        } else {
+            self.devices.push(device);
+        }
+    }
+
+    pub fn find(&self, id: &str) -> Option<&Device> {
+        if let Some(exact) = self.devices.iter().find(|row| row.id == id) {
+            return Some(exact);
+        }
+        let mut matches = self.devices.iter().filter(|row| row.matches_id(id));
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
     }
 }
 
@@ -165,6 +263,59 @@ pub fn address(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_source_keeps_the_newest_reading_for_reenumerated_usb_hid() {
+        let port = "sys:/sys/devices/pci0000:00/usb1/1-2/1-2:1.0/0003:046D:C53F";
+        let mut old = Device::new(
+            format!("{port}.000A"),
+            "Mouse".into(),
+            Kind::Mouse,
+            "UPower",
+        );
+        old.reading.percent = Some(20);
+        old.updated_at = 100;
+        let mut current = Device::new(
+            "serial:12345678:Mouse".into(),
+            "Mouse".into(),
+            Kind::Mouse,
+            "UPower",
+        );
+        current.native_id = Some(format!("UPower:{port}.000B"));
+        current.reading.percent = Some(100);
+        current.updated_at = 101;
+
+        let mut scan = Scan::default();
+        scan.insert(current.clone());
+        scan.insert(old.clone());
+        assert_eq!(scan.devices.len(), 1);
+        let found = scan.find(&old.id).unwrap();
+        assert_eq!(found.id, current.id);
+        assert_eq!(found.reading.percent, Some(100));
+        assert!(!current.matches_id(&old.id.replace("1-2", "1-3")));
+        assert!(!current.matches_id(&old.id.replace("1.0", "1.1")));
+        assert!(!current.matches_id(&old.id.replace("C53F", "C540")));
+        assert!(!current.matches_id(&old.id.replace("UPower:", "Linux power_supply:")));
+        let child = format!("UPower:{port}.000A/0003:046D:4080");
+        assert!(!same_id(&format!("{child}.000B"), &format!("{child}.000C")));
+
+        // The scan also keeps the serial-based ID if only the path record has fresh data.
+        old.updated_at = 102;
+        scan.insert(old.clone());
+        assert_eq!(scan.devices.len(), 1);
+        let found = scan.find(&old.id).unwrap();
+        assert_eq!(found.id, current.id);
+        assert_eq!(found.reading.percent, Some(20));
+
+        let mut current = old.clone();
+        current.id = format!("UPower:{port}.000C");
+        current.reading.percent = Some(100);
+        let mut scan = Scan::default();
+        scan.insert(old.clone());
+        scan.insert(current);
+        assert_eq!(scan.devices.len(), 1);
+        assert_eq!(scan.find(&old.id).unwrap().reading.percent, Some(100));
+    }
     #[test]
     fn charge_bands_preserve_boundaries_and_text_levels() {
         for (percent, expected) in [

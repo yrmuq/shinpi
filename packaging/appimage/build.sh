@@ -16,8 +16,8 @@ case "$ARCH" in
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 TOOL="$CACHE/appimagetool-x86_64.AppImage"
-TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
-TOOL_SHA="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+TOOL_SHA="e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03"
 if [ ! -s "$TOOL" ] || ! echo "$TOOL_SHA  $TOOL" | sha256sum -c - >/dev/null 2>&1; then
     curl -fL --retry 3 -o "$TOOL.part" "$TOOL_URL"
     echo "$TOOL_SHA  $TOOL.part" | sha256sum -c -
@@ -73,8 +73,14 @@ cp "$APPDIR/shinpi.svg" "$APPDIR/usr/share/icons/hicolor/scalable/apps/shinpi.sv
 OUT="$DIST/shinpi-$ARCH.AppImage"
 # zsyncmake writes its output in the working directory.
 cd "$DIST"
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream \
-    -u "gh-releases-zsync|yrmuq|shinpi|latest|shinpi-$ARCH.AppImage.zsync" "$APPDIR" "$OUT"
+set -- "shinpi-$ARCH.AppImage"
+if [ "${SHINPI_DEV_DRAFT:-false}" = true ]; then
+    rm -f "$1.zsync"
+    APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream "$APPDIR" "$OUT"
+else
+    APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream \
+        -u "gh-releases-zsync|yrmuq|shinpi|latest|shinpi-$ARCH.AppImage.zsync" "$APPDIR" "$OUT"
+    set -- "$1" "$1.zsync"
+fi
 chmod +x "$OUT"
-cd "$DIST"
-sha256sum "shinpi-$ARCH.AppImage" "shinpi-$ARCH.AppImage.zsync" > "shinpi-$ARCH.AppImage.sha256"
+sha256sum "$@" > "shinpi-$ARCH.AppImage.sha256"

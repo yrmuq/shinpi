@@ -158,17 +158,24 @@ fn upower_device(path: &str, props: &Props) -> Option<Device> {
     let native = string(props, "NativePath");
     let native_name = Path::new(&native).file_name().unwrap_or_default();
     let battery_path = Path::new("/sys/class/power_supply").join(native_name);
+    let native_key =
+        (!native_name.is_empty() && battery_path.exists()).then(|| power_key(&battery_path));
     // UPower's object path may contain a renumbered hidpp_battery_N node.
     let key = address(&serial).unwrap_or_else(|| {
         if !serial.is_empty() {
             format!("serial:{serial}:{name}")
-        } else if !native_name.is_empty() && battery_path.exists() {
-            power_key(&battery_path)
         } else {
-            path.to_owned()
+            native_key.clone().unwrap_or_else(|| path.to_owned())
         }
     });
     let mut device = Device::new(key, name, kind, "UPower");
+    if !serial.is_empty() {
+        device.native_id = native_key.map(|key| format!("UPower:{key}"));
+    }
+    device.updated_at = props
+        .get("UpdateTime")
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_default();
     device.reading = Reading {
         percent: if number(props, "BatteryLevel") == 1 {
             props

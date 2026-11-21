@@ -19,6 +19,8 @@ jobs:
   appimage:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
+    env:
+      SHINPI_DEV_DRAFT: "true"
     timeout-minutes: ${{ inputs.include_flatpak && 90 || 30 }}
     outputs:
       needed: ${{ steps.plan.outputs.needed }}
@@ -54,7 +56,6 @@ jobs:
           path: |
             dist/shinpi-x86_64.AppImage
             dist/shinpi-x86_64.AppImage.sha256
-            dist/shinpi-x86_64.AppImage.zsync
             dist/*.flatpak
             dist/*.flatpak.sha256
             target/debug/shinpi-tools
