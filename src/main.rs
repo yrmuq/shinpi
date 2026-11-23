@@ -516,6 +516,12 @@ fn ensure_settings(
         let _ = tx.send(Command::Remove(index as usize));
     });
     let tx = sender.clone();
+    settings.on_move_device(move |id, index| {
+        if let Ok(index) = usize::try_from(index) {
+            let _ = tx.send(Command::MoveDevice(id.to_string(), index));
+        }
+    });
+    let tx = sender.clone();
     settings.on_save_device(move |name, kind| {
         let _ = tx.send(Command::SaveEdit(name.to_string(), kind as usize));
     });
@@ -526,6 +532,10 @@ fn ensure_settings(
     let tx = sender.clone();
     settings.on_theme_selected(move |index| {
         let _ = tx.send(Command::Theme(index));
+    });
+    let tx = sender.clone();
+    settings.on_tiles_selected(move |tiles| {
+        let _ = tx.send(Command::Tiles(tiles));
     });
     let tx = sender.clone();
     settings.on_orientation_selected(move |index| {
@@ -713,6 +723,7 @@ fn paint(shell: &Shell, state: &State) {
     if let Some(popup) = &shell.popup {
         window_style!(popup);
         popup.set_panel_width(cfg.panel_width as i32);
+        popup.set_tiles(cfg.tiles);
         popup.set_history_enabled(cfg.history_count > 0);
         popup.set_history_hidden(cfg.history_hidden);
         if let Some(icon) = icons::theme_icon("configure") {
@@ -838,6 +849,7 @@ fn paint(shell: &Shell, state: &State) {
             "dark" => 2,
             _ => 0,
         });
+        settings.set_tiles(cfg.tiles);
         settings.set_orientation(i32::from(cfg.tray_orientation));
         settings.set_icon_theme(if cfg.colored_icon { 0 } else { 1 });
         settings.set_notifications(cfg.notifications);
@@ -871,6 +883,7 @@ fn row(
         }
     };
     DeviceRow {
+        id: Default::default(),
         name: name.into(),
         charge: if reading.charging {
             reading
@@ -903,7 +916,10 @@ fn fill(shell: &Shell, state: &State) {
         .config
         .devices
         .iter()
-        .map(|d| row(&d.name, d.kind, &d.reading, &d.source, true, &state.catalog))
+        .map(|d| DeviceRow {
+            id: d.id.clone().into(),
+            ..row(&d.name, d.kind, &d.reading, &d.source, true, &state.catalog)
+        })
         .collect();
     if let Some(popup) = &shell.popup {
         if !popup.get_rows().iter().eq(rows.iter().cloned()) {
@@ -917,8 +933,17 @@ fn fill(shell: &Shell, state: &State) {
     let Some(settings) = &shell.settings else {
         return;
     };
-    if !settings.get_rows().iter().eq(rows.iter().cloned()) {
-        settings.set_rows(ModelRc::new(VecModel::from(rows)));
+    let model = settings.get_rows();
+    if !model.iter().eq(rows.iter().cloned()) {
+        if model.row_count() == rows.len() && model.iter().zip(&rows).all(|(a, b)| a.id == b.id) {
+            for (index, row) in rows.into_iter().enumerate() {
+                if model.row_data(index).as_ref() != Some(&row) {
+                    model.set_row_data(index, row);
+                }
+            }
+        } else {
+            settings.set_rows(ModelRc::new(VecModel::from(rows)));
+        }
     }
     let candidates: Vec<_> = state
         .scan
@@ -1242,6 +1267,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             changed = true;
                         }
                     }
+                    Command::MoveDevice(id, to) => {
+                        changed |= data.borrow_mut().config.move_device(&id, to);
+                    }
                     Command::Edit(index) => {
                         let device = data.borrow().config.devices.get(index).cloned();
                         if let (Some(device), Some(settings)) = (device, &windows.settings) {
@@ -1303,6 +1331,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Command::Orientation(index) => {
                         data.borrow_mut().config.tray_orientation = index.min(3);
+                        changed = true;
+                    }
+                    Command::Tiles(tiles) => {
+                        data.borrow_mut().config.tiles = tiles;
                         changed = true;
                     }
                     Command::Colored(value) => {

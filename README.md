@@ -58,6 +58,8 @@
 | Triangle | Toggle notification history. |
 | `×` on a notification | Dismiss the entry. |
 | Pin icon | Keep the panel open when it loses focus. |
+| Drag a row in Settings → Devices with the left mouse button | Change the saved device order in the tray panel. |
+| Settings → General → Buttons type | Switch the tray panel between a list and a tile grid. |
 | `Escape` | Close the unpinned panel. |
 | `Tab`, `Enter`, `Space` | Navigate and activate toolbar controls. |
 | `--window` | Open the panel at startup. |

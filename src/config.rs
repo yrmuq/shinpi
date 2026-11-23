@@ -10,6 +10,8 @@ pub const DEFAULT_LOGO_SIZE: u32 = 100;
 #[serde(default)]
 pub struct Config {
     pub theme: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub tiles: bool,
     pub language: String,
     pub tray_orientation: u8,
     pub colored_icon: bool,
@@ -41,6 +43,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: String::new(),
+            tiles: false,
             language: String::new(),
             tray_orientation: 2,
             colored_icon: true,
@@ -116,6 +119,7 @@ impl Config {
         let defaults = Self::default();
         self.language = defaults.language;
         self.theme = defaults.theme;
+        self.tiles = defaults.tiles;
         self.tray_orientation = defaults.tray_orientation;
         self.colored_icon = defaults.colored_icon;
         self.panel_width = defaults.panel_width;
@@ -138,6 +142,18 @@ impl Config {
             reading: device.reading.clone(),
             last_notified: 0,
         });
+    }
+
+    pub fn move_device(&mut self, id: &str, to: usize) -> bool {
+        let Some(from) = self.devices.iter().position(|device| device.id == id) else {
+            return false;
+        };
+        if from == to || to >= self.devices.len() {
+            return false;
+        }
+        let device = self.devices.remove(from);
+        self.devices.insert(to, device);
+        true
     }
 
     pub fn observe(&mut self, scan: &Scan) -> bool {
@@ -254,6 +270,37 @@ pub fn save(config: &Config) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_order_and_tile_layout_persist_together() {
+        let mut config = Config::default();
+        assert!(!config.tiles);
+        for name in ["Mouse", "Keyboard", "Headset"] {
+            config.add(&Device::new(name.into(), name.into(), Kind::Other, "test"));
+        }
+        config.devices[0].reading.percent = Some(20);
+        config.devices[0].last_notified = 123;
+        config.tiles = true;
+        assert!(config.move_device("test:Mouse", 2));
+        assert!(!config.move_device("test:Mouse", 2));
+        assert!(!config.move_device("test:Mouse", 3));
+        assert!(!config.move_device("test:Missing", 0));
+
+        let mut restored: Config =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert!(restored.tiles);
+        let names = restored
+            .devices
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["Keyboard", "Headset", "Mouse"]);
+        assert_eq!(restored.devices[2].reading.percent, Some(20));
+        assert_eq!(restored.devices[2].last_notified, 123);
+        restored.reset_appearance();
+        assert!(!restored.tiles);
+        assert_eq!(restored.devices[2].name, "Mouse");
+    }
     #[test]
     fn notification_count_replaces_the_old_enable_switch() {
         for (json, expected) in [

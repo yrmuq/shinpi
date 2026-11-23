@@ -25,6 +25,8 @@ pub enum Command {
     SaveEdit(String, usize),
     Language(usize),
     Theme(i32),
+    Tiles(bool),
+    MoveDevice(String, usize),
     Orientation(u8),
     Colored(bool),
     Notifications(bool),
